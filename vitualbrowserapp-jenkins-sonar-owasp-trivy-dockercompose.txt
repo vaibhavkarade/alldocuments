@@ -1,0 +1,59 @@
+pipeline {
+    agent any
+    environment {
+        SCANNER_HOME=tool 'sonar-scanner'
+    }
+
+    stages {
+        stage('checkout') {
+            steps {
+                checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/vaibhavkarade/vitual-browser.git']])
+            }
+        }
+        stage('OWASP SCAN') {
+            steps {
+                dependencyCheck additionalArguments: ' --scan ./ --disableNodeAudit', odcInstallation: 'DC'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        } 
+      stage("Sonarqube Analysis "){
+            steps{
+                withSonarQubeEnv('sonar-server') {
+                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=Vitualbrowser \
+                    -Dsonar.projectKey=Vitualbrowser '''
+                }
+            }
+        }
+       stage('docker build') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker-cred', toolName: 'Docker') {
+                    dir('/var/lib/jenkins/workspace/virtual-browser/.docker/firefox') {
+                   sh " docker build -t vaibhavkarade/vitualbrowser ."
+                   
+}   
+}
+                }
+            }
+        } 
+      stage('trivy scan') {
+            steps {
+                sh "trivy image vaibhavkarade/vitualbrowser > trivy.txt"
+            }
+        }
+       stage('docker push') {
+            steps {
+                script {
+                     withDockerRegistry(credentialsId: 'docker-cred', toolName: 'Docker') {
+                sh "docker push vaibhavkarade/vitualbrowser"
+                }
+            }
+            }
+        } 
+        stage('Deploy') {
+            steps {
+                sh "docker-compose up -d"
+            }
+        }
+    }
+}

@@ -1,0 +1,32 @@
+pipeline {
+    agent any
+    tools {
+        maven 'maven'
+    }
+
+    stages {
+        stage('Build') {
+            steps {
+                echo 'Hello World'
+                checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/devopshint/java-maven-project.git']])
+                sh "mvn -Dmaven.test.failure.ignore=true clean package"
+                sh "mvn clean install"
+            }
+        }
+        stage('deploy') {
+            steps {
+            sh 'scp /home/ubuntu/.jenkins/workspace/Declarative_Pipeline_For_Five_Stages/webapp/target/webapp.war ubuntu@10.0.25.238:/var/lib/tomcat9/webapps/qaserver.war'    
+    }
+}
+
+
+
+
+
+
+
+
+plugin:
+maven integration
+maven plugin integration
+Pipeline Utility Steps

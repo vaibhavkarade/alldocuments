@@ -1,0 +1,114 @@
+# ------------------------- CONFIGURATION -------------------------
+Write-Output "🔧 Starting work item fetch script..."
+
+# Define variables
+$organization = "DevOpsStuffs"                                # Replace with your Azure DevOps organization name
+$project = "WorkItemAutomation"                               # Replace with your Azure DevOps project name
+$iterationPath = "WorkItemAutomation\Iteration 1\sprint1"     # Replace with your iteration path
+$pat = "n1b7ZrPQsG2ieC8IsOW3Pj8KWqkKCJ6ZBPXiVV7zYSIgVlaU97LgJQQJ99BGACAAAAAc0or1AAASAZDO3TJs"  # Replace with your PAT
+
+# Prepare authentication information
+$base64AuthInfo = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$pat"))
+
+Write-Output "🔐 Auth info prepared"
+Write-Output "📍 Iteration path = $iterationPath"
+
+# ------------------------- WIQL QUERY -------------------------
+$wiqlQuery = @"
+SELECT [System.Id]
+FROM WorkItems
+WHERE [System.TeamProject] = '$project'
+AND [System.WorkItemType] = 'User Story'
+AND [System.State] = 'Resolved'
+AND [System.IterationPath] = '$iterationPath'
+"@
+
+Write-Output "📝 WIQL Query:"
+Write-Output $wiqlQuery
+
+$wiql = @{ query = $wiqlQuery }
+
+try {
+    # Send the WIQL query
+    Write-Output "📡 Sending WIQL query..."
+    $uri = "https://dev.azure.com/$organization/$project/_apis/wit/wiql?api-version=6.0"
+
+    $response = Invoke-RestMethod -Uri $uri `
+        -Method Post `
+        -Body ($wiql | ConvertTo-Json -Depth 10 -Compress) `
+        -Headers @{
+            Authorization = "Basic $base64AuthInfo"
+            "Content-Type" = "application/json"
+        }
+
+    $workItems = $response.workItems
+    Write-Output "✅ WIQL response received."
+
+    # Handle case where no work items are found
+    if (!$workItems -or $workItems.Count -eq 0) {
+        Write-Output "ℹ️ No 'Resolved' user stories found in iteration path: $iterationPath"
+        return
+    }
+
+    Write-Output "🔍 Found $($workItems.Count) user stories in 'Resolved' state."
+    Write-Output "🔍 Retrieved Work Item IDs: $($workItems | ForEach-Object { $_.id })"
+
+    # Process and update each work item
+    foreach ($workItem in $workItems) {
+        # Explicit assignment of $id to ensure it's not null or invalid
+        $id = $workItem.id
+
+        # Validate the ID
+        if (-not $id -or $null -eq $id -or $id -eq "") {
+            Write-Output "⚠️ Skipping invalid or empty Work Item ID."
+            continue
+        }
+
+        Write-Output "▶️ Retrieved ID: $($id)"
+        Write-Output "📡 Updating Work Item #$($id) to 'Closed' state..."
+
+        # Build PATCH request body (force array structure)
+        $patchBody = @(
+            @{
+                op    = "add"
+                path  = "/fields/System.State"
+                value = "Closed"
+            }
+        )
+
+        # Convert the PATCH body to JSON and enforce array structure
+        $patchBodyJson = $patchBody | ConvertTo-Json -Depth 10 -Compress -AsArray
+        Write-Output "📦 Patch Body: $patchBodyJson"
+
+        # Construct the correct URI for updating the work item
+        $updateUri = "https://dev.azure.com/$organization/_apis/wit/workitems/$($id)?api-version=6.0"
+
+        # Debugging the constructed URI
+        Write-Output "📡 URI constructed for Work Item #$($id): $($updateUri)"
+
+        # Make the PATCH request
+        try {
+            $updateResponse = Invoke-RestMethod -Uri $updateUri `
+                -Method Patch `
+                -Body $patchBodyJson `
+                -Headers @{
+                    Authorization = "Basic $base64AuthInfo"
+                    "Content-Type" = "application/json-patch+json"
+                }
+
+            Write-Output "✅ Work Item #$($id) updated to 'Closed' state."
+        } catch {
+            Write-Output "❌ Failed to update Work Item #$($id). Error: $($_.Exception.Message)"
+            if ($_.ErrorDetails) {
+                Write-Output "📄 Details: $($_.ErrorDetails.Message)"
+            }
+        }
+    }
+
+} catch {
+    # Handle exceptions during WIQL query
+    Write-Output "❌ Exception occurred: $($_.Exception.Message)"
+    if ($_.ErrorDetails) {
+        Write-Output "📄 Details: $($_.ErrorDetails.Message)"
+    }
+}

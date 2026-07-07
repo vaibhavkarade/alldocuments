@@ -1,0 +1,10 @@
+---
+- name: Install Python and Pip on Ubuntu/Debian
+  hosts: all
+  become: yes  # Use elevated privileges
+
+  tasks:
+    - name: Install Python and Pip
+      package:
+        name: python3-pip  # Package name for Python and Pip on Ubuntu/Debian
+        state: present

@@ -1,0 +1,87 @@
+############################################
+# HARD-CODED CONFIGURATION
+############################################
+
+# Azure
+$SubscriptionId = "4644440b-bc86-4390-be9f-3b9cd524ba60"
+
+# Databricks Workspace
+$DatabricksUrl = "https://adb-7405617945742447.7.azuredatabricks.net"
+
+# Key Vault
+$KeyVaultName  = "autokeycicd"
+$PatSecretName = "Dbx-Dev-PAT"
+
+# SQL Warehouse Configuration
+$WarehouseName     = "sql-warehouse-dev"
+$ClusterSize       = "Small"      # X-Small | Small | Medium | Large
+$MinClusters       = 1
+$MaxClusters       = 2
+$AutoStopMinutes   = 10            # Auto stop after inactivity
+$EnableServerless  = $true
+
+############################################
+# LOGIN USING MANAGED IDENTITY
+############################################
+
+Write-Output "Logging in to Azure using Managed Identity..."
+Connect-AzAccount -Identity -SubscriptionId $SubscriptionId
+
+############################################
+# GET PAT TOKEN FROM KEY VAULT
+############################################
+
+Write-Output "Fetching Databricks PAT token from Key Vault..."
+
+$PatToken = Get-AzKeyVaultSecret `
+    -VaultName $KeyVaultName `
+    -Name $PatSecretName `
+    -AsPlainText
+
+$Headers = @{
+    Authorization = "Bearer $PatToken"
+    "Content-Type" = "application/json"
+}
+
+############################################
+# CHECK IF SQL WAREHOUSE EXISTS (IDEMPOTENT)
+############################################
+
+Write-Output "Checking if SQL Warehouse already exists..."
+
+$WarehouseList = Invoke-RestMethod `
+    -Method GET `
+    -Uri "$DatabricksUrl/api/2.0/sql/warehouses" `
+    -Headers $Headers
+
+$ExistingWarehouse = $WarehouseList.warehouses | Where-Object {
+    $_.name -eq $WarehouseName
+}
+
+if ($ExistingWarehouse) {
+    Write-Output "SQL Warehouse '$WarehouseName' already exists. Skipping creation."
+    return
+}
+
+############################################
+# CREATE SQL WAREHOUSE
+############################################
+
+Write-Output "Creating Databricks SQL Warehouse..."
+
+$WarehousePayload = @{
+    name                  = $WarehouseName
+    cluster_size          = $ClusterSize
+    min_num_clusters      = $MinClusters
+    max_num_clusters      = $MaxClusters
+    auto_stop_mins        = $AutoStopMinutes
+    enable_serverless_compute = $EnableServerless
+} | ConvertTo-Json -Depth 10
+
+Invoke-RestMethod `
+    -Method POST `
+    -Uri "$DatabricksUrl/api/2.0/sql/warehouses" `
+    -Headers $Headers `
+    -Body $WarehousePayload
+
+Write-Output "SQL Warehouse '$WarehouseName' created successfully."

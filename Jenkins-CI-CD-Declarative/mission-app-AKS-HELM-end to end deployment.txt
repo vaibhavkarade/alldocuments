@@ -1,0 +1,143 @@
+pipeline {
+    agent any
+    tools {
+        jdk 'jdk17'
+        nodejs 'node16'
+    }
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+        RESOURCE_GROUP = 'myResourceGroup'
+        AKS_CLUSTER = 'myAKSCluster'
+        REGION = 'eastus'
+        HELM_CHART_PATH = 'helm-chart'
+        NAMESPACE = 'default'
+        DOCKER_IMAGE = 'vaibhavkarade/tetris'
+    }
+    stages {
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+        stage('Checkout from Git') {
+            steps {
+                git branch: 'main', url: 'https://github.com/vaibhavkarade/Tetris-V2.git'
+            }
+        }
+        stage('Sonarqube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar-server') {
+                    sh '''$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=TetrisVersion2.0 \
+                    -Dsonar.projectKey=TetrisVersion2.0'''
+                }
+            }
+        }
+        stage('Quality Gate') {
+            steps {
+                script {
+                    waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token'
+                }
+            }
+        }
+        stage('Install Dependencies') {
+            steps {
+                sh "npm update"
+                sh "npm install"
+            }
+        }
+        stage('OWASP FS Scan') {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP-Check'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+        stage('Trivy FS Scan') {
+            steps {
+                sh "trivy fs . > trivyfs.txt"
+            }
+        }
+        stage('Docker Build & Push') {
+            steps {
+                script {
+                    def dockerImage = 'vaibhavkarade/tetris'
+                    def dockerTag = 'latest'
+                    def fullImageName = "${dockerImage}:${dockerTag}"
+
+                    withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+                        sh "docker build -t ${dockerImage} ."
+                        sh "docker tag ${dockerImage} ${fullImageName}"
+                        sh "docker push ${fullImageName}"
+                    }
+                }
+            }
+        }
+        stage('Trivy Image Scan') {
+            steps {
+                sh "trivy image vaibhavkarade/tetris:latest > trivyimage.txt"
+            }
+        }
+        stage('Update Helm Chart') {
+            steps {
+                script {
+                    def image = "${DOCKER_IMAGE}"
+                    def tag = "latest"
+                    sh "sed -i 's|repository: .*|repository: ${image}|' ${HELM_CHART_PATH}/values.yaml"
+                    sh "sed -i 's|tag: .*|tag: ${tag}|' ${HELM_CHART_PATH}/values.yaml"
+                    sh 'git add ${HELM_CHART_PATH}/values.yaml'
+                    sh 'git commit -m "Update image to ${image}:${tag}"'
+                    withCredentials([string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN')]) {
+                        sh "git push https://${GITHUB_TOKEN}@github.com/vaibhavkarade/Tetris-V2.git main"
+                    }
+                }
+            }
+        }
+        stage('Deploy with Helm') {
+            steps {
+                script {
+                    withCredentials([
+                        string(credentialsId: 'AZURE_CLIENT_ID', variable: 'AZURE_CLIENT_ID'),
+                        string(credentialsId: 'AZURE_CLIENT_SECRET', variable: 'AZURE_CLIENT_SECRET'),
+                        string(credentialsId: 'AZURE_TENANT_ID', variable: 'AZURE_TENANT_ID'),
+                        string(credentialsId: 'AZURE_SUBSCRIPTION_ID', variable: 'AZURE_SUBSCRIPTION_ID')
+                    ]) {
+                        sh '''
+                            # Login to Azure using the service principal
+                            az login --service-principal -u $AZURE_CLIENT_ID -p $AZURE_CLIENT_SECRET --tenant $AZURE_TENANT_ID
+
+                            # Set the subscription
+                            az account set --subscription $AZURE_SUBSCRIPTION_ID
+
+                            # Get credentials for the AKS cluster
+                            az aks get-credentials --resource-group ${RESOURCE_GROUP} --name ${AKS_CLUSTER} --overwrite-existing
+
+                            # Ensure the namespace exists
+                            kubectl get namespace ${NAMESPACE} || kubectl create namespace ${NAMESPACE}
+
+                            # Deploy or upgrade the application using Helm
+                            helm upgrade --install tetris-app ${HELM_CHART_PATH} --namespace ${NAMESPACE}
+                        '''
+                    }
+                }
+            }
+        }
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    withCredentials([
+                        string(credentialsId: 'AZURE_CLIENT_ID', variable: 'AZURE_CLIENT_ID'),
+                        string(credentialsId: 'AZURE_CLIENT_SECRET', variable: 'AZURE_CLIENT_SECRET'),
+                        string(credentialsId: 'AZURE_TENANT_ID', variable: 'AZURE_TENANT_ID'),
+                        string(credentialsId: 'AZURE_SUBSCRIPTION_ID', variable: 'AZURE_SUBSCRIPTION_ID')
+                    ]) {
+                        sh """
+                            az aks get-credentials --resource-group ${RESOURCE_GROUP} --name ${AKS_CLUSTER}
+                            kubectl get pods
+                            kubectl get deployment
+                            kubectl get svc
+                        """
+                    }
+                }
+            }
+        }
+    }
+}

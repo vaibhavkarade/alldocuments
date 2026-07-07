@@ -1,0 +1,5 @@
+Repos:https://dev.azure.com/RB-Group/Group%20-%20edap/_git/Edap-E2E-logicapp
+
+Build pipeline:https://dev.azure.com/RB-Group/Group%20-%20edap/_build?definitionId=6704
+
+Release pipeline:https://dev.azure.com/RB-Group/Group%20-%20edap/_release?_a=releases&view=mine&definitionId=152

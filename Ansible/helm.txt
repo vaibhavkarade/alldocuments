@@ -1,0 +1,27 @@
+---
+- name: Install Helm
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Create directory for Helm
+      file:
+        path: /opt/helm
+        state: directory
+
+    - name: Download Helm binary
+      get_url:
+        url: https://get.helm.sh/helm-v3.7.0-linux-amd64.tar.gz
+        dest: /tmp/helm.tar.gz
+
+    - name: Extract Helm binary
+      ansible.builtin.unarchive:
+        src: /tmp/helm.tar.gz
+        dest: /opt/helm
+        remote_src: yes
+
+    - name: Move Helm binary to /usr/local/bin
+      command: mv /opt/helm/linux-amd64/helm /usr/local/bin/helm
+
+    - name: Test Helm installation
+      command: helm version

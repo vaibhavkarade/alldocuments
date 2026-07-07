@@ -1,0 +1,89 @@
+param(
+    [Parameter(Mandatory=$true)]
+    [string]$DevStorageAccountName,
+
+    [Parameter(Mandatory=$true)]
+    [string]$ProdStorageAccountName,
+
+    [Parameter(Mandatory=$true)]
+    [string]$DevResourceGroup,
+
+    [Parameter(Mandatory=$true)]
+    [string]$ProdResourceGroup
+)
+
+# Import Az module
+Import-Module Az.Accounts
+Import-Module Az.Storage
+
+# Authenticate to Azure using Managed Identity of Automation Account
+Write-Output "Logging into Azure..."
+Connect-AzAccount -Identity
+
+# Get storage account keys
+$DevKey = (Get-AzStorageAccountKey -ResourceGroupName $DevResourceGroup -Name $DevStorageAccountName)[0].Value
+$ProdKey = (Get-AzStorageAccountKey -ResourceGroupName $ProdResourceGroup -Name $ProdStorageAccountName)[0].Value
+
+# Create contexts
+$DevContext = New-AzStorageContext -StorageAccountName $DevStorageAccountName -StorageAccountKey $DevKey
+$ProdContext = New-AzStorageContext -StorageAccountName $ProdStorageAccountName -StorageAccountKey $ProdKey
+
+# Get all containers from Dev
+$DevContainers = Get-AzStorageContainer -Context $DevContext
+$ProdContainers = Get-AzStorageContainer -Context $ProdContext
+
+foreach ($container in $DevContainers) {
+    Write-Output "Processing container: $($container.Name)"
+
+    # Ensure container exists in Prod
+    $ProdContainer = Get-AzStorageContainer -Context $ProdContext -Name $container.Name -ErrorAction SilentlyContinue
+    if (-not $ProdContainer) {
+        Write-Output "Creating container $($container.Name) in Prod..."
+        New-AzStorageContainer -Context $ProdContext -Name $container.Name | Out-Null
+    }
+
+    # Get blobs from Dev and Prod
+    $DevBlobs = Get-AzStorageBlob -Context $DevContext -Container $container.Name
+    $ProdBlobs = Get-AzStorageBlob -Context $ProdContext -Container $container.Name
+
+    # Convert ProdBlobs list to hash for quick lookup
+    $ProdBlobsHash = @{}
+    foreach ($pb in $ProdBlobs) {
+        $ProdBlobsHash[$pb.Name] = $pb
+    }
+
+    # Sync Add/Update
+    foreach ($blob in $DevBlobs) {
+        if ($ProdBlobsHash.ContainsKey($blob.Name)) {
+            $destBlob = $ProdBlobsHash[$blob.Name]
+            if ($blob.ICloudBlob.Properties.LastModified -gt $destBlob.ICloudBlob.Properties.LastModified) {
+                Write-Output "Updating blob: $($blob.Name)"
+                Start-AzStorageBlobCopy -SrcBlob $blob.Name -SrcContainer $container.Name -Context $DevContext -DestContainer $container.Name -DestContext $ProdContext -Force
+            }
+            else {
+                Write-Output "Blob $($blob.Name) already up to date."
+            }
+            $ProdBlobsHash.Remove($blob.Name) # Mark as processed
+        }
+        else {
+            Write-Output "Copying new blob: $($blob.Name)"
+            Start-AzStorageBlobCopy -SrcBlob $blob.Name -SrcContainer $container.Name -Context $DevContext -DestContainer $container.Name -DestContext $ProdContext
+        }
+    }
+
+    # Delete extra blobs in Prod
+    foreach ($remaining in $ProdBlobsHash.Values) {
+        Write-Output "Deleting blob in Prod (not in Dev): $($remaining.Name)"
+        Remove-AzStorageBlob -Blob $remaining.Name -Container $container.Name -Context $ProdContext -Force
+    }
+}
+
+# Delete extra containers in Prod
+foreach ($ProdContainer in $ProdContainers) {
+    if (-not ($DevContainers.Name -contains $ProdContainer.Name)) {
+        Write-Output "Deleting container in Prod (not in Dev): $($ProdContainer.Name)"
+        Remove-AzStorageContainer -Name $ProdContainer.Name -Context $ProdContext -Force
+    }
+}
+
+Write-Output "Full sync complete!"

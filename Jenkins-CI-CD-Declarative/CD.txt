@@ -1,0 +1,16 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('Docker Deploy to container') {
+            steps {
+                script{
+                  withDockerRegistry(credentialsId: '4b7891d3-d9a2-4296-94ee-7549b307621b', url: 'https://hub.docker.com/') {
+    sh "docker run -d --name shopping-cart -p 8070:8070 vaibhavkarade/shopping:latest"
+} 
+                }
+                
+            }
+        }
+    }
+}

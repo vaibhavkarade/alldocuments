@@ -1,0 +1,104 @@
+trigger: none            # Run manually or hook to your own triggers
+pr: none
+
+variables:
+  runbookName: 'devrunbookcicd'
+  devSubscriptionId: '8172f712-63ee-44d9-8b59-3fa257b9dcbd'
+  prodSubscriptionId: '8172f712-63ee-44d9-8b59-3fa257b9dcbd'
+  devResourceGroup: 'cicd-auto'
+  devAutomationAccount: 'devautocicd'
+  prodResourceGroup: 'cicd-auto'
+  prodAutomationAccount: 'prodautocicd'
+  runbookFileName: 'devrunbookcicd.ps1'      # use .ps1 / .psm1 / .py etc.
+
+stages:
+
+# ---------------------------------------------------------------------------
+- stage: ExportRunbook
+  displayName: 'Export runbook from Dev'
+  jobs:
+  - job: Export
+    displayName: 'Export Dev runbook'
+    pool:
+      vmImage: 'windows-latest'
+    steps:
+    - task: AzurePowerShell@5
+      displayName: 'Export runbook'
+      inputs:
+        azureSubscription: 'svc-conn-dev-automation'
+        ScriptType: 'InlineScript'
+        azurePowerShellVersion: 'LatestVersion'
+        pwsh: true
+        Inline: |
+          Install-Module Az.Automation -Scope CurrentUser -Force -AllowClobber
+
+          Write-Host "Setting context to Dev subscription $(devSubscriptionId)"
+          Set-AzContext -SubscriptionId $(devSubscriptionId)
+
+          $outputFolder = "$(Build.ArtifactStagingDirectory)"
+          New-Item -Type Directory -Force -Path $outputFolder | Out-Null
+
+          Write-Host "Exporting published runbook $(runbookName) ..."
+          Export-AzAutomationRunbook `
+            -ResourceGroupName $(devResourceGroup) `
+            -AutomationAccountName $(devAutomationAccount) `
+            -Name $(runbookName) `
+            -Slot Published `
+            -OutputFolder $outputFolder `
+            -Force
+
+          $exportedFile = Join-Path $outputFolder "$(runbookFileName)"
+          if (!(Test-Path $exportedFile)) {
+            throw "Runbook export failed. Expected file $exportedFile not found."
+          }
+
+          Write-Host "##vso[task.setvariable variable=exportedFilePath;isOutput=true]$exportedFile"
+    - publish: $(Build.ArtifactStagingDirectory)
+      artifact: RunbookPackage
+
+# ---------------------------------------------------------------------------
+- stage: ImportRunbook
+  displayName: 'Import runbook into Prod'
+  dependsOn: ExportRunbook
+  jobs:
+  - job: Import
+    displayName: 'Import to Prod'
+    pool:
+      vmImage: 'windows-latest'
+    steps:
+    - download: current
+      artifact: RunbookPackage
+    - task: AzurePowerShell@5
+      displayName: 'Import & publish runbook'
+      inputs:
+        azureSubscription: 'svc-conn-dev-automation'
+        ScriptType: 'InlineScript'
+        azurePowerShellVersion: 'LatestVersion'
+        pwsh: true
+        Inline: |
+          Install-Module Az.Automation -Scope CurrentUser -Force -AllowClobber
+
+          Write-Host "Setting context to Prod subscription $(prodSubscriptionId)"
+          Set-AzContext -SubscriptionId $(prodSubscriptionId)
+
+          $artifactFolder = "$(Pipeline.Workspace)/RunbookPackage"
+          $runbookPath = Join-Path $artifactFolder "$(runbookFileName)"
+
+          if (!(Test-Path $runbookPath)) {
+            throw "Runbook artifact not found at $runbookPath."
+          }
+
+          Write-Host "Importing runbook into Prod Automation..."
+          Import-AzAutomationRunbook `
+            -ResourceGroupName $(prodResourceGroup) `
+            -AutomationAccountName $(prodAutomationAccount) `
+            -Name $(runbookName) `
+            -Path $runbookPath `
+            -Type PowerShell `
+            -Force
+
+          Write-Host "Publishing runbook ..."
+          Publish-AzAutomationRunbook `
+            -ResourceGroupName $(prodResourceGroup) `
+            -AutomationAccountName $(prodAutomationAccount) `
+            -Name $(runbookName)

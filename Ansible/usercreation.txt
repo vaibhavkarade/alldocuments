@@ -1,0 +1,10 @@
+---
+- name: Create a user
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Create a user
+      user:
+        name: john
+        password: "$6$SALT$ENCRYPTEDPASSWORD"

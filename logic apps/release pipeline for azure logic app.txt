@@ -1,0 +1,23 @@
+stages:
+- stage: Deploy_Prod
+  jobs:
+  - deployment: Deploy_Prod
+    environment: 'Prod'
+    pool:
+      vmImage: 'ubuntu-latest'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: AzureResourceManagerTemplateDeployment@3
+            inputs:
+              deploymentScope: 'Resource Group'
+              azureResourceManagerConnection: '<Your-Azure-Service-Connection>'
+              subscriptionId: '<Your-Azure-Subscription-ID>'
+              action: 'Create Or Update Resource Group'
+              resourceGroupName: '<Your-Prod-Resource-Group>'
+              location: '<Your-Resource-Group-Location>'
+              templateLocation: 'Linked artifact'
+              csmFile: '$(System.DefaultWorkingDirectory)/drop/your-template-file.json'
+              csmParametersFile: '$(System.DefaultWorkingDirectory)/drop/your-parameters-file.json'
+              deploymentMode: 'Incremental'

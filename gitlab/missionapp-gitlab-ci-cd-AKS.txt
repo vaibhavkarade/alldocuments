@@ -1,0 +1,133 @@
+stages:
+  - compile
+  - scan
+  - sonarqube
+  - package
+  - upload_to_nexus
+  - build
+  - imagescan
+  - pushimage
+  - deployAKS
+
+variables:
+  # MAVEN_CLI_OPTS: "-s .m2/settings.xml --batch-mode"
+  SONAR_SCANNER_OPTS: "-Dsonar.projectKey=mission -DskipTests=true"
+  NEXUS_REPO: "releases"
+
+# # before_script:
+#   - echo "Starting job: ${CI_JOB_NAME}"
+
+compile:
+  stage: compile
+  tags:
+    - mission
+  script:
+    - mvn compile -DskipTests=true
+  artifacts:
+    paths:
+      - target/
+
+scan:
+  stage: scan
+  tags:
+    - mission
+  dependencies:
+    - compile
+  script:
+    - echo "Running Trivy scan"
+    # - mkdir -p fsreports
+    - trivy fs --format table -o trivy-fs-report.html .
+  artifacts:
+    paths:
+      - trivy-fs-report.html
+
+      
+sonarqube:
+  stage: sonarqube
+  image: maven:3.6.3-jdk-11
+  variables:
+    SONAR_USER_HOME: "${CI_PROJECT_DIR}/.sonar"  # Defines the location of the analysis task cache
+    GIT_DEPTH: "0"  # Tells git to fetch all the branches of the project, required by the analysis task
+  cache:
+    key: "${CI_JOB_NAME}"
+    paths:
+      - .sonar/cache
+  script: 
+    - mvn verify sonar:sonar -Dsonar.projectKey=mission -DskipTests=true
+  allow_failure: true
+  only:
+    - main
+
+
+
+
+package:
+  stage: package
+  tags:
+    - mission
+  dependencies:
+    - sonarqube
+  script:
+    - mvn $MAVEN_CLI_OPTS package -DskipTests=true
+  artifacts:
+    paths:
+      - target/
+
+
+upload_to_nexus:
+  stage: upload_to_nexus
+  tags:
+    - mission
+  dependencies:
+    - package
+  script:
+    - mvn deploy -DskipTests=true --batch-mode --settings .m2/settings.xml -DaltDeploymentRepository=nexus::default::${NEXUS_URL}/repository/${NEXUS_REPO}
+  only:
+    - main
+
+build:
+  stage: build
+  tags:
+    - mission
+  dependencies:
+    - package
+  script:
+    - echo "${CI_REGISTRY_PASSWORD}" | docker login -u "${CI_REGISTRY_USER}" --password-stdin
+    - docker build -t ${CI_REGISTRY_IMAGE}:latest .
+ 
+
+
+imagescan:
+  stage: imagescan
+  tags:
+    - mission
+  dependencies:
+    - build
+  script:
+    - echo "Running Trivy imagescan"
+    
+    - trivy image --format table -o trivy-image-report.html ${CI_REGISTRY_IMAGE}:latest
+  artifacts:
+    paths:
+      - trivy-image-report.html
+
+pushimage:
+  stage: pushimage
+  tags:
+    - mission
+  dependencies:
+    - imagescan
+  script:
+    - docker push ${CI_REGISTRY_IMAGE}:latest
+    
+deployAKS:
+  stage: deployAKS
+  dependencies:
+    - buildpush
+  script:
+    - echo "$KUBE_CONFIG" | base64 -d > kubeconfig
+    - export KUBECONFIG=$(pwd)/kubeconfig
+    - kubectl apply -f ds.yml
+  only:
+    - main
+

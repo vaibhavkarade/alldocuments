@@ -1,0 +1,10 @@
+using azure Cloud shell with powershell
+
+$pat = az keyvault secret show --vault-name autokeycicd --name AzDo-PAT --query value -o tsv
+$env:AZURE_DEVOPS_EXT_PAT = $pat
+az extension add --name azure-devops --yes
+az devops configure --defaults organization=https://dev.azure.com/DevOpsStuffs
+az devops project show --project cicdtestauto --query id -o tsv
+Remove-Item Env:AZURE_DEVOPS_EXT_PAT
+
+2952fc96-f4b6-4f7a-917b-883c6d821e4e

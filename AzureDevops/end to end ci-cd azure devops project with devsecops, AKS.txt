@@ -1,0 +1,78 @@
+# Node.js
+# Build a general Node.js project with npm.
+# Add steps that analyze code, save build artifacts, deploy, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/languages/javascript
+
+trigger:
+- main
+
+pool:
+  name: myntra
+
+steps:
+- task: NodeTool@0
+  inputs:
+    versionSpec: '10.x'
+  displayName: 'Install Node.js'
+
+- script: |
+    npm install
+    npm run build
+  displayName: 'npm install and build'
+
+- task: SonarQubePrepare@5
+  inputs:
+    SonarQube: 'sonar'
+    scannerMode: 'CLI'
+    configMode: 'manual'
+    cliProjectKey: 'myntra'
+    cliProjectName: 'myntra'
+    cliSources: '.'
+    extraProperties: 'sonar.java.binaries=.'
+
+
+- task: SonarQubeAnalyze@5
+  inputs:
+    jdkversion: 'JAVA_HOME_11_X64'
+
+- task: SonarQubePublish@5
+  inputs:
+    pollingTimeoutSec: '100'
+
+- task: dependency-check-build-task@6
+  inputs:
+    projectName: 'myntra'
+    scanPath: '.'
+    format: 'HTML'
+    uploadReports: true
+
+- task: Bash@3
+  inputs:
+    targetType: 'inline'
+    script: 'trivy fs . > trivyfs.json'
+
+- task: Docker@2
+  inputs:
+    containerRegistry: 'docker'
+    repository: 'vaibhavkarade/myntra'
+    command: 'buildAndPush'
+    Dockerfile: '**/Dockerfile'
+  
+  
+- task: Bash@3
+  inputs:
+      targetType: 'inline'
+      script: 'trivy image vaibhavkarade/myntra:latest > trivy.json'
+
+- task: Bash@3
+  inputs:
+    targetType: 'inline'
+    script: 'docker run -d --name myntra -p 3000:3000 vaibhavkarade/myntra:latest'
+
+- task: KubernetesManifest@1
+  inputs:
+    action: 'deploy'
+    connectionType: 'kubernetesServiceConnection'
+    kubernetesServiceConnection: 'K8S'
+    namespace: 'default'
+    manifests: 'deployment-service.yml'

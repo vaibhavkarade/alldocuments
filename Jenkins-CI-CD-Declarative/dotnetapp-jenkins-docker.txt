@@ -1,0 +1,55 @@
+pipeline {
+agent {label 'jenkins-slave'}
+   
+    tools {
+        maven 'MAVEN'
+        jdk 'JDK'
+    }
+    environment {
+        SCANNER_HOME= tool 'sonar-scanner'
+    }
+    stages {
+        stage('checkout') {
+            steps {
+                checkout scmGit(branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/vaibhavkarade/dotnet-app.git']])
+            }
+        }
+      
+         stage('sonarqube') {
+            steps {
+              sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.url=http://52.224.0.180:9000/ -Dsonar.login=squ_3c0145ee529a40fa1b4e8dec535aaea5789bb423 -Dsonar.projectName=dotnet-app \
+              -Dsonar.java.binaries=. \
+              -Dsonar.projectKey=dotnet-app '''
+            }
+        } 
+          stage('OWASP SCAN') {
+            steps {
+                dependencyCheck additionalArguments: ' --scan ./', odcInstallation: 'DP'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        } 
+         stage('Trivy FS SCan') {
+            steps {
+                sh "trivy fs ."
+            }
+        }
+           
+            stage('build and push image') {
+            steps {
+                script {
+                  withDockerRegistry(credentialsId: 'dockerhub', toolName: 'docker') {
+                sh 'make image'
+                sh 'make push'
+}  
+                }
+            }
+        } 
+            stage('deploy') {
+            steps {
+                script{
+                    sh 'docker run -d --name dotnet-app -p 5000:5000 vaibhavkarade/dotnet-demoapp'
+                }
+            }
+        } 
+    }
+}

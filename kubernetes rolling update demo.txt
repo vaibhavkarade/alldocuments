@@ -1,0 +1,78 @@
+A running Kubernetes cluster (e.g., Minikube, GKE, or EKS).
+kubectl CLI tool to interact with the Kubernetes cluster.
+
+
+Step 1: Create the Initial Deployment
+Create the first deployment for NGINX (version 1.21.0).
+
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.21.0
+          ports:
+            - containerPort: 80
+
+
+
+kubectl get deployments
+kubectl get pods
+
+
+
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+spec:
+  selector:
+    app: nginx
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+  type: LoadBalancer  # Or ClusterIP for internal-only access
+
+
+
+
+
+kubectl get svc nginx-service
+
+
+
+Step 3: Perform a Rolling Update
+Now, we will simulate a rolling update by changing the NGINX version from 1.21.0 to 1.22.0. We'll update the deployment without causing downtime.
+
+Update the Deployment to the new version of NGINX (nginx:1.22.0).
+
+kubectl set image deployment/nginx-deployment nginx=nginx:1.22.0
+
+
+kubectl rollout status deployment/nginx-deployment
+kubectl rollout history deployment/nginx-deployment
+kubectl get pods -l app=nginx -w
+
+
+
+kubectl rollout undo deployment/nginx-deployment
+
+
+
+
+kubectl delete -f nginx-deployment-v1.yaml
+kubectl delete -f nginx-service.yaml

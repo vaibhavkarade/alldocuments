@@ -1,0 +1,10 @@
+sp=rw&st=2024-11-21T03:42:57Z&se=2025-03-27T11:42:57Z&spr=https&sv=2022-11-02&sr=c&sig=Ovr9X%2BsrG4d1YP7rqje7hYiJRi8SmptWrqU2gxfu%2Bx8%3D
+
+
+https://satrinitydevddscorest02.blob.core.windows.net/adlstrinitydev-harboreraneos?sp=rw&st=2024-11-21T03:42:57Z&se=2025-03-27T11:42:57Z&spr=https&sv=2022-11-02&sr=c&sig=Ovr9X%2BsrG4d1YP7rqje7hYiJRi8SmptWrqU2gxfu%2Bx8%3D
+
+keyvault: kvtrinitydeveun
+secretname: satrinitydevddscorest02-adlstrinitydev-harboreraneos
+
+
+databricks secrets put-acl --scope satrinitydevddscorest02-adlstrinitydev-harboreraneos-all --principal Azure - Group - Dev - Trinity - S Databricks - PoC Harbor - Contributors - Generic --permission READ

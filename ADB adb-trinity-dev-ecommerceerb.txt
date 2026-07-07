@@ -1,0 +1,5 @@
+ADB: adb-trinity-dev-ecommerceerb
+https://adb-6703808319533762.2.azuredatabricks.net/jobs/641003607212156/runs/801969602765108?o=6703808319533762
+
+Interactive cluster: Cluster - Trinity - UC eRB360
+adf:adf-trinity-dev-ecommerceerb360-northeurope

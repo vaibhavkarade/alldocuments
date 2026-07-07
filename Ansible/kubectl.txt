@@ -1,0 +1,24 @@
+---
+- name: Install kubectl
+  hosts: all
+  become: yes
+  tasks:
+    - name: Create directory for kubectl
+      ansible.builtin.file:
+        path: /usr/local/bin
+        state: directory
+
+    - name: Get latest Kubernetes version
+      ansible.builtin.uri:
+        url: https://storage.googleapis.com/kubernetes-release/release/stable.txt
+        return_content: yes
+      register: k8s_version
+
+    - name: Download kubectl binary
+      ansible.builtin.get_url:
+        url: "https://storage.googleapis.com/kubernetes-release/release/{{ k8s_version.content }}/bin/linux/amd64/kubectl"
+        dest: /usr/local/bin/kubectl
+        mode: 'u+x'
+
+    - name: Verify kubectl installation
+      ansible.builtin.command: kubectl version --client

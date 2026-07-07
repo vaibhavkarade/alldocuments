@@ -1,0 +1,46 @@
+pipeline {
+    agent any
+
+    environment {
+        DOCKER_REGISTRY = 'your-docker-registry.com'
+        IMAGE_NAME = 'your-image-name'
+        IMAGE_TAG = 'latest'
+        SWARM_MANAGER_IP = 'swarm-manager-ip'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git 'https://github.com/your/repository.git'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                script {
+                    docker.build("${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}")
+                }
+            }
+        }
+
+        stage('Push') {
+            steps {
+                script {
+                    docker.withRegistry('https://${DOCKER_REGISTRY}', 'docker-registry-credentials') {
+                        docker.image("${DOCKER_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}").push()
+                    }
+                }
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                script {
+                    docker.withServer('tcp://${SWARM_MANAGER_IP}:2375', 'docker-swarm-credentials') {
+                        sh 'docker stack deploy -c docker-compose.yml your-stack-name'
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,15 @@
+first server:
+ssh-keygen
+ssh-copy-id remoteusername@remoteIp # copy pub key in authorized file of remote machine
+ssh remoteusername@remoteIp
+
+
+Second server:
+open /etc/ssh/sshd_config and edit passwordauthenication, permit root login, pubkey
+restart sshd # systemctl restart sshd
+
+
+
+Manual:
+first server: ssh-keygen
+second server : copy pub key of first server and paste it in authorized file of second server

@@ -1,0 +1,21 @@
+Jenkins Master:
+Install java and jenkins
+manage jenkins>nodes>add node and configure
+open node and copy the script from node and run it in node server to connect to master server
+
+
+
+Jenkins Slave:
+Install java and make sure java version should be same as master.
+
+
+
+Jenkins master workspace:/var/lib/jenkins/workspace/projectname
+Jenkins slave workspace: custom which we provide it in node configuration for ex /opt/build
+
+To use slave, we need to use label in the code to run jenkins job on slave.
+
+
+
+
+

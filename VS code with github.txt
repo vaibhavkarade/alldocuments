@@ -1,0 +1,12 @@
+VS code with github
+1)clone the repo and open it in vS code
+2)connect to github account from vs code
+3)work on the repo and commit it
+4)push it to github
+git init
+git add .
+git commit -m "message"
+git push origin master/main
+
+
+

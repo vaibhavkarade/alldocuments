@@ -1,0 +1,58 @@
+pipeline {
+agent {label 'jenkins-slave'}
+   
+    tools {
+        maven 'MAVEN'
+        jdk 'JDK'
+    }
+    environment {
+        SCANNER_HOME= tool 'sonar-scanner'
+    }
+    stages {
+        stage('checkout') {
+            steps {
+                checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/vaibhavkarade/petstore-app.git']])
+            }
+        }
+        stage('compile') {
+            steps {
+                sh 'mvn clean compile'
+            }
+        } 
+         stage('sonarqube') {
+            steps {
+              sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.url=http://52.224.0.180:9000/ -Dsonar.login=squ_3c0145ee529a40fa1b4e8dec535aaea5789bb423 -Dsonar.projectName=petstore-app \
+              -Dsonar.java.binaries=. \
+              -Dsonar.projectKey=petstore-app '''
+            }
+        } 
+          stage('OWASP SCAN') {
+            steps {
+                dependencyCheck additionalArguments: ' --scan ./', odcInstallation: 'DP'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        } 
+           stage('build app') {
+            steps {
+                sh 'mvn clean install -DskipTests'
+            }
+        } 
+            stage('build and push image') {
+            steps {
+                script {
+                  withDockerRegistry(credentialsId: 'dockerhub', toolName: 'docker') {
+                sh 'docker build -t vaibhavkarade/petstore-app .'
+                sh 'docker push vaibhavkarade/petstore-app'
+}  
+                }
+            }
+        } 
+            stage('deploy') {
+            steps {
+                script{
+                    sh 'docker run -d --name petstore-app -p 8090:8090 vaibhavkarade/petstore-app'
+                }
+            }
+        } 
+    }
+}

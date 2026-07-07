@@ -1,0 +1,50 @@
+# azure-pipelines.yml
+
+trigger:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+- task: UseDotNet@2
+  inputs:
+    packageType: 'sdk'
+    version: '5.x'
+
+- task: AzureCLI@2
+  inputs:
+    azureSubscription: 'your-azure-subscription'
+    scriptType: 'bash'
+    scriptLocation: 'inlineScript'
+    inlineScript: |
+      echo "Validating Logic App definition..."
+      # Add validation logic if necessary
+      echo "Validation complete."
+
+- task: PublishBuildArtifacts@1
+  inputs:
+    PathtoPublish: '$(System.DefaultWorkingDirectory)'
+    ArtifactName: 'logicapp-artifact'
+
+# Release pipeline YAML
+stages:
+- stage: Deploy
+  jobs:
+  - job: DeployLogicApp
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - download: current
+      artifact: logicapp-artifact
+
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: 'your-azure-subscription'
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          az login --service-principal -u $(azureServicePrincipalId) -p $(azureServicePrincipalPassword) --tenant $(azureTenantId)
+          az logicapp deployment create --resource-group <resource-group> --name <logic-app-name> --definition @$(System.DefaultWorkingDirectory)/logicapp-artifact/logicsapp.json

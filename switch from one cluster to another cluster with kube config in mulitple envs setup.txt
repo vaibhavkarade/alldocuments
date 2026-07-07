@@ -1,0 +1,31 @@
+# Step 1: Log in to Azure
+az login
+
+# Step 2: Set the subscription (optional)
+az account set --subscription "Your Subscription ID or Name"
+
+# Step 3: Create Resource Groups
+az group create --name dev-rg --location eastus
+az group create --name qa-rg --location eastus
+az group create --name prod-rg --location eastus
+
+# Step 4: Create AKS Clusters
+az aks create --resource-group dev-rg --name dev-cluster --node-count 2 --enable-addons monitoring --generate-ssh-keys --location eastus
+az aks create --resource-group qa-rg --name qa-cluster --node-count 2 --enable-addons monitoring --generate-ssh-keys --location eastus
+az aks create --resource-group prod-rg --name prod-cluster --node-count 3 --enable-addons monitoring --generate-ssh-keys --location eastus
+
+# Step 5: Get Credentials for Each Cluster
+az aks get-credentials --resource-group dev-rg --name dev-cluster
+az aks get-credentials --resource-group qa-rg --name qa-cluster
+az aks get-credentials --resource-group prod-rg --name prod-cluster
+
+# Step 6: Switch Between Clusters Using kubectl
+kubectl config use-context dev-cluster
+kubectl config use-context qa-cluster
+kubectl config use-context prod-cluster
+
+
+
+check current context: kubectl config get-contexts
+delete the kube config context : kubectl config delete-context <context-name>
+

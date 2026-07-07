@@ -1,0 +1,151 @@
+pipeline {
+    agent any
+    
+    parameters {
+        choice(name: 'DEPLOY_ENV', choices: ['blue', 'green'], description: 'Choose which environment to deploy: Blue or Green')
+        choice(name: 'DOCKER_TAG', choices: ['blue', 'green'], description: 'Choose the Docker image tag for the deployment')
+        booleanParam(name: 'SWITCH_TRAFFIC', defaultValue: false, description: 'Switch traffic between Blue and Green')
+    }
+    
+    environment {
+        IMAGE_NAME = "vaibhavkarade/bluegreenbankapp"
+        TAG = "${params.DOCKER_TAG}"  // The image tag now comes from the parameter
+        KUBE_NAMESPACE = 'webapps'
+        SCANNER_HOME = tool 'sonar-scanner'
+        AZURE_CLIENT_ID = '410ada39-774d-4090-880b-59d78eea961c'
+        AZURE_CLIENT_SECRET = credentials('azure-sp-credential')
+        AZURE_TENANT_ID = 'b41b72d0-4e9f-4c26-8a69-f949f367c91d'
+        RESOURCE_GROUP = 'myResourceGroup'
+        AKS_NAME = 'myAKSCluster'
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/vaibhavkarade/Blue-Green-Deployment.git'
+            }
+        }
+        
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar') {
+                    sh "$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectKey=bluegreenbankapp -Dsonar.projectName=bluegreenbankapp -Dsonar.java.binaries=."
+                }
+            }
+        }
+        
+        stage('Trivy FS Scan') {
+            steps {
+                sh "trivy fs --format table -o fs.html ."
+            }
+        }
+        
+        stage('Build') {
+            steps {
+                sh "mvn package -DskipTests=true"
+            }
+        }
+        
+        stage('Docker Build') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker-cred') {
+                        sh "docker build -t ${IMAGE_NAME}:${TAG} ."
+                    }
+                }
+            }
+        }
+        
+        stage('Trivy Image Scan') {
+            steps {
+                sh "trivy image --format table -o image.html ${IMAGE_NAME}:${TAG}"
+            }
+        }
+        
+        stage('Docker Push Image') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker-cred') {
+                        sh "docker push ${IMAGE_NAME}:${TAG}"
+                    }
+                }
+            }
+        }
+        
+        stage('Deploy MySQL Deployment and Service') {
+            steps {
+                script {
+                    sh """
+                    az logout
+                    az login --service-principal -u $AZURE_CLIENT_ID -p $AZURE_CLIENT_SECRET --tenant $AZURE_TENANT_ID
+                    az aks get-credentials --resource-group $RESOURCE_GROUP --name $AKS_NAME
+                    kubectl apply -f mysql-ds.yml -n ${KUBE_NAMESPACE}
+                    """
+                }
+            }
+        }
+        
+        stage('Deploy Bank App Service') {
+            steps {
+                script {
+                    sh """
+                    az login --service-principal -u $AZURE_CLIENT_ID -p $AZURE_CLIENT_SECRET --tenant $AZURE_TENANT_ID
+                    az aks get-credentials --resource-group $RESOURCE_GROUP --name $AKS_NAME
+                    if ! kubectl get svc bankapp-service -n ${KUBE_NAMESPACE}; then
+                        kubectl apply -f bankapp-service.yml -n ${KUBE_NAMESPACE}
+                    fi
+                    """
+                }
+            }
+        }
+        
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    def deploymentFile = (params.DEPLOY_ENV == 'blue') ? 'app-deployment-blue.yml' : 'app-deployment-green.yml'
+                    sh """
+                    az login --service-principal -u $AZURE_CLIENT_ID -p $AZURE_CLIENT_SECRET --tenant $AZURE_TENANT_ID
+                    az aks get-credentials --resource-group $RESOURCE_GROUP --name $AKS_NAME
+                    kubectl apply -f ${deploymentFile} -n ${KUBE_NAMESPACE}
+                    """
+                }
+            }
+        }
+    
+
+        
+        stage('Switch Traffic Between Blue & Green Environment') {
+            when {
+                expression { return params.SWITCH_TRAFFIC }
+            }
+            steps {
+                script {
+                    def newEnv = params.DEPLOY_ENV
+
+                    // Always switch traffic based on DEPLOY_ENV
+                   
+                        sh '''
+                            kubectl patch service bankapp-service -p "{\\"spec\\": {\\"selector\\": {\\"app\\": \\"bankapp\\", \\"version\\": \\"''' + newEnv + '''\\"}}}" -n ${KUBE_NAMESPACE}
+                        '''
+                    
+                    echo "Traffic has been switched to the ${newEnv} environment."
+                }
+            }
+        }
+        
+        stage('Verify Deployment') {
+            steps {
+                script {
+                    def verifyEnv = params.DEPLOY_ENV
+                    
+                        sh """
+                        kubectl get pods -l version=${verifyEnv} -n ${KUBE_NAMESPACE}
+                        kubectl get svc bankapp-service -n ${KUBE_NAMESPACE}
+                        """
+                    
+                }
+            }
+        }
+    }
+}
+    

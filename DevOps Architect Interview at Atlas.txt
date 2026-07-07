@@ -1,0 +1,35 @@
+DevOps Architect Interview at Atlassian 
+
+Round 1 – Infra, Kubernetes, and Cloud Patterns (45 mins)
+• Design a multi-tenant EKS cluster with isolation across dev, QA, and prod, with no noisy neighbors.
+• What’s your approach to managing 10+ Kustomize overlays without drift or duplication?
+• Explain how you’d secure cross-region S3 replication and validate data integrity at scale.
+• What happens when systemd hits a failing unit in a containerized node? How would you auto-recover?
+• Walk through your strategy to detect & mitigate pod-to-pod lateral movement inside a cluster.
+• How do you perform zero-downtime upgrades for a stateful workload using Helm 3?
+• Describe a hybrid cloud routing architecture between GCP and AWS. Where do you enforce boundaries?
+• Your Terraform state got corrupted during a backend migration. Rebuild strategy?
+• Bash One-liner: Find all running containers using more than 500MB RSS memory on a node.
+
+Round 2 – Real Fire, RCA, and Chaos Control (75 mins)
+• A new AWS ALB config caused TLS handshakes to fail intermittently. Walk through your full RCA path.
+• Kubernetes nodes are healthy. But kubectl logs is blank for critical pods. What’s happening?
+• You deployed a sidecar logging agent. Suddenly, CPU throttling spikes. Diagnose and rollback.
+• Autoscaling isn’t kicking in despite the CPU crossing the threshold. What’s broken — metrics, HPA, or API server?
+• Prod users reporting 504s, but ELB health checks are green. Explain your isolation + triage process.
+• Systemd journal logs vanish on reboot across some AMIs. What do you check in the image build and boot sequence?
+• A production pod was OOMKilled, but you can’t find logs. Walk through a forensic-level debug.
+• Kernel panic on a GKE node mid-deploy. How do you identify if it’s infra, base image, or app-level?
+
+Round 3 – Leadership, Engineering Influence & Production Principles (30 mins)
+• How do you design infrastructure that empowers devs without giving them footguns?
+• What’s your Linux-level checklist before approving any custom AMI to production?
+• You’ve been asked to move from centralized logging to a service-mesh-based observability model. Your tradeoffs?
+• Describe how you simulate production-level chaos in staging for Kubernetes.
+• How do you handle pushback from leadership when your SLOs threaten velocity?
+
+
+
+
+
+

@@ -1,0 +1,6 @@
+ mkdir -p ~/.docker/cli-plugins/
+ wget https://github.com/docker/scout/releases/download/v0.15.0/docker-scout_0.15.0_linux_amd64.tar.gz
+ tar xvzf *.tar.gz
+ mv docker-scout ~/.docker/cli-plugins/
+ chmod +x ~/.docker/cli-plugins/docker-scout
+  141  docker scout quickview nginx:latest

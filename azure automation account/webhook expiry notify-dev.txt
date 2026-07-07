@@ -1,0 +1,98 @@
+# Connect to Azure account
+Connect-AzAccount -Identity
+
+# Set the specific subscription context
+$subscriptionId = "5429b473-49e7-4190-b60a-6f7c6bd69b21"  # Replace with the target subscription ID
+Set-AzContext -SubscriptionId $subscriptionId
+Write-Output "Switched to Subscription ID: $subscriptionId"
+
+# Define Automation Account details
+$resourceGroupName = "rg-edap-dev-usecasesupplyanalytics-westeurope"  # Replace with your resource group name
+$automationAccountName = "auto-Group-sa-dev-westeurope01"  # Replace with your Automation Account name
+
+# Fetch the current date and set the alert threshold (15 days from today)
+$currentDate = Get-Date
+$alertThreshold = $currentDate.AddDays(15)
+
+# List all webhooks in the specified Automation Account
+$webhooks = Get-AzAutomationWebhook -ResourceGroupName $resourceGroupName -AutomationAccountName $automationAccountName
+
+# Filter and output only the expiring webhooks
+$expiringWebhooks = $webhooks | Where-Object { 
+    $_.ExpiryTime -gt $currentDate -and $_.ExpiryTime -le $alertThreshold 
+}
+
+# Email details
+$emailBody = @"
+<html>
+<head>
+    <style>
+        table {
+            border-collapse: collapse;
+            width: 100%;
+        }
+        th, td {
+            border: 1px solid #dddddd;
+            text-align: left;
+            padding: 8px;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+    </style>
+</head>
+<body>
+    <h2>Expiring Webhooks Report</h2>
+    <table>
+        <tr>
+            <th>Webhook Name</th>
+            <th>Expiry Date</th>
+            <th>Runbook Name</th>
+            <th>Automation Account</th>
+        </tr>
+"@
+
+$recipientEmails = "vishnu.chand@reckitt.com, vaibhav.karade@reckitt.com"  # Replace with actual email addresses
+$subject = "List of Expiring Webhooks"
+$fromEmail = "srv.edap@rb.com"  # Replace with the sender's email
+
+if ($expiringWebhooks.Count -gt 0) {
+    foreach ($webhook in $expiringWebhooks) {
+        $webhookName = $webhook.Name
+        $expiryDate = $webhook.ExpiryTime.ToString("yyyy-MM-dd HH:mm:ss")
+        $runbookName = $webhook.RunbookName
+
+        # Append webhook details to email body in table rows
+        $emailBody += "        <tr>
+            <td>$webhookName</td>
+            <td>$expiryDate</td>
+            <td>$runbookName</td>
+            <td>$automationAccountName</td>
+        </tr>`n"
+    }
+
+    # Close the table and HTML
+    $emailBody += @"
+    </table>
+</body>
+</html>
+"@
+
+    # Create the email message
+    $smtpClient = New-Object System.Net.Mail.SmtpClient("outlook.office365.com", 587)  # Replace with your SMTP server
+    $smtpClient.EnableSsl = $true
+    $smtpClient.Credentials = Get-AutomationPSCredential -Name "Email"
+    $mailMessage = New-Object System.Net.Mail.MailMessage
+    $mailMessage.From = $fromEmail
+    $recipientEmails.Split(",") | ForEach-Object { $mailMessage.To.Add($_) }
+    $mailMessage.Subject = $subject
+    $mailMessage.Body = $emailBody
+    $mailMessage.IsBodyHtml = $true  # Use HTML formatting
+
+    # Send the email
+    $smtpClient.Send($mailMessage)
+    Write-Output "Email sent with the list of expiring webhooks."
+} else {
+    Write-Output "No webhooks are expiring within the next 15 days."
+}
+

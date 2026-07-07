@@ -1,0 +1,18 @@
+open powershell as admin
+Install-Module -Name LogicAppTemplate 
+az login and select subscription (dev)
+
+
+
+$parameters = @{
+   Token = (az account get-access-token | ConvertFrom-Json).accessToken
+   LogicApp = 'la-trinity-dev-files-integration'
+   ResourceGroup = 'rg-trinity-dev-integration-northeurope'
+   SubscriptionId = '1c8e6f54-0377-489d-bf28-4fd0060fe722'
+   Verbose = $true
+}
+
+
+
+Get-LogicAppTemplate @parameters | Out-File C:\template.json
+Get-ParameterTemplate -TemplateFile 'C:\template.json' | Out-File 'C:\Parameters.json'

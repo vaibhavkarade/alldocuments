@@ -1,0 +1,37 @@
+pipeline {
+    agent any
+    tools {
+        maven "MAVEN3"
+        jdk "JDK17"
+    }
+
+    stages {
+        stage('checkout') {
+            steps {
+                checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/vaibhavkarade/ekart.git']])
+            }
+        }
+        stage('build') {
+            steps {
+                sh "mvn clean install -DskipTests=true"
+            }
+        }
+        stage('build and push') {
+            steps{
+            script {
+            withDockerRegistry(credentialsId: 'docker', toolName: 'docker') {
+         sh "docker build -t vaibhavkarade/ekartapp ."
+         sh "docker push vaibhavkarade/ekartapp"
+}
+            }
+        }
+    }
+    stage ('deploy to K8s'){
+        steps {
+           withKubeConfig(caCertificate: '', clusterName: '', contextName: '', credentialsId: 'k8s-token', namespace: 'webapps', restrictKubeConfigAccess: false, serverUrl: 'https://192.168.49.2:8443') {
+               sh "kubectl apply -f deploymentservice.yml -n webapps"
+        } 
+        }
+    }
+}
+}

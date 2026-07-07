@@ -1,0 +1,255 @@
+<#
+.SYNOPSIS
+    Creates or updates Entra ID security groups defined in a CSV and assigns default owners using a service principal.
+.DESCRIPTION
+    - Works with a CSV that has a single column "GroupName".
+    - Uses OAuth2 client credentials to get a Microsoft Graph token.
+    - Issues REST calls directly; no dependency on Connect-MgGraph.
+    - Owners are provided via Automation variable "DefaultGroupOwners".
+#>
+
+[CmdletBinding()]
+param(
+    [string]$CsvUri,
+    [string[]]$OwnersOverride
+)
+
+$ErrorActionPreference = 'Stop'
+
+$csvVariableName      = 'GroupCsvSasUrl'
+$ownersVariableName   = 'DefaultGroupOwners'
+$clientIdVariable     = 'GraphClientId'
+$tenantIdVariable     = 'GraphTenantId'
+$clientSecretVariable = 'GraphClientSecret'
+
+function Get-TrimmedOrNull {
+    param([string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
+    return $Value.Trim()
+}
+
+function Copy-Hashtable {
+    param([hashtable]$source)
+    $clone = @{}
+    if ($source) {
+        foreach ($key in $source.Keys) { $clone[$key] = $source[$key] }
+    }
+    return $clone
+}
+
+Write-Output "=== Create-EntraGroups-REST run started at $(Get-Date -Format u) ==="
+
+# Resolve CSV URI
+if (-not $PSBoundParameters.ContainsKey('CsvUri') -or [string]::IsNullOrWhiteSpace($CsvUri)) {
+    $CsvUri = Get-AutomationVariable -Name $csvVariableName
+}
+$CsvUri = Get-TrimmedOrNull $CsvUri
+if ([string]::IsNullOrWhiteSpace($CsvUri)) {
+    throw "CSV URI not provided and Automation variable '$csvVariableName' is empty."
+}
+Write-Output "CSV location: $CsvUri"
+
+# Resolve owner list
+if ($OwnersOverride -and $OwnersOverride.Count -gt 0) {
+    $globalOwners = $OwnersOverride | ForEach-Object { Get-TrimmedOrNull $_ } | Where-Object { $_ }
+}
+else {
+    $ownersString = Get-TrimmedOrNull (Get-AutomationVariable -Name $ownersVariableName)
+    if ([string]::IsNullOrWhiteSpace($ownersString)) {
+        throw "Owner list not provided and Automation variable '$ownersVariableName' is empty."
+    }
+    $globalOwners = $ownersString -split ';' | ForEach-Object { Get-TrimmedOrNull $_ } | Where-Object { $_ }
+}
+if (-not $globalOwners -or $globalOwners.Count -eq 0) {
+    throw "No valid owner UPNs were resolved."
+}
+Write-Output "Owners to assign: $($globalOwners -join ', ')"
+
+# Service principal credentials
+$clientId     = Get-TrimmedOrNull (Get-AutomationVariable -Name $clientIdVariable)
+$tenantId     = Get-TrimmedOrNull (Get-AutomationVariable -Name $tenantIdVariable)
+$clientSecret = Get-AutomationVariable -Name $clientSecretVariable  # encrypted variable returns plain text inside Automation
+
+if ([string]::IsNullOrWhiteSpace($clientId) -or
+    [string]::IsNullOrWhiteSpace($tenantId) -or
+    [string]::IsNullOrWhiteSpace($clientSecret)) {
+    throw "Service principal credentials are missing. Check Automation variables '$clientIdVariable', '$tenantIdVariable', '$clientSecretVariable'."
+}
+
+# Download CSV
+$tmpPath = Join-Path $env:TEMP ("Groups_{0}.csv" -f ([guid]::NewGuid().Guid))
+try {
+    Write-Output "Downloading CSV..."
+    Invoke-WebRequest -Uri $CsvUri -OutFile $tmpPath -UseBasicParsing
+}
+catch {
+    throw "Failed to download CSV. $_"
+}
+
+try {
+    $groupsData = Import-Csv -Path $tmpPath
+}
+catch {
+    throw "Failed to parse CSV. Ensure it has a 'GroupName' column. $_"
+}
+finally {
+    Remove-Item -Path $tmpPath -ErrorAction SilentlyContinue
+}
+
+if (-not $groupsData -or $groupsData.Count -eq 0) {
+    throw "CSV contains no records."
+}
+Write-Output "CSV rows retrieved: $($groupsData.Count)"
+
+# Obtain access token via OAuth2 client credentials flow
+$tokenEndpoint = "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token"
+$tokenBody = @{
+    client_id     = $clientId
+    client_secret = $clientSecret
+    scope         = "https://graph.microsoft.com/.default"
+    grant_type    = "client_credentials"
+}
+try {
+    Write-Output "Requesting access token from $tokenEndpoint"
+    $tokenResponse = Invoke-RestMethod -Method Post -Uri $tokenEndpoint -Body $tokenBody -ContentType "application/x-www-form-urlencoded"
+}
+catch {
+    throw "Failed to obtain access token. $_"
+}
+if (-not $tokenResponse.access_token) {
+    throw "Token response missing 'access_token'. Response: $($tokenResponse | ConvertTo-Json -Depth 5)"
+}
+$accessToken = $tokenResponse.access_token
+
+# Prepare headers for Graph calls
+$graphBase = "https://graph.microsoft.com/v1.0"
+$headers = @{
+    Authorization = "Bearer $accessToken"
+    "Content-Type" = "application/json"
+}
+$headersConsistency = Copy-Hashtable -source $headers
+$headersConsistency["ConsistencyLevel"] = "eventual"
+
+# Process groups
+foreach ($row in $groupsData) {
+    $groupName = Get-TrimmedOrNull $row.GroupName
+    if ([string]::IsNullOrWhiteSpace($groupName)) {
+        Write-Warning "Skipping row with empty GroupName."
+        continue
+    }
+
+    $displayName  = $groupName
+    $description  = $groupName
+    $mailNickname = ($displayName -replace '[^a-zA-Z0-9]', '-').ToLower()
+
+    Write-Output "`nProcessing group '$displayName'..."
+
+    $escapedNickname = $mailNickname.Replace("'", "''")
+    $groupLookupUri  = "$graphBase/groups`?\$filter=mailNickname eq '$escapedNickname'&\$top=1"
+    $existingGroup   = $null
+
+    try {
+        $lookupResponse = Invoke-RestMethod -Uri $groupLookupUri -Method Get -Headers $headersConsistency
+        if ($lookupResponse.value) {
+            $existingGroup = $lookupResponse.value[0]
+        }
+    }
+    catch {
+        Write-Warning "  Lookup by mailNickname failed. $_"
+    }
+
+    if (-not $existingGroup) {
+        $escapedDisplay = $displayName.Replace("'", "''")
+        $displayLookupUri = "$graphBase/groups`?\$filter=displayName eq '$escapedDisplay'&\$top=1"
+        try {
+            $displayResponse = Invoke-RestMethod -Uri $displayLookupUri -Method Get -Headers $headersConsistency
+            if ($displayResponse.value) {
+                $existingGroup = $displayResponse.value[0]
+            }
+        }
+        catch {
+            Write-Warning "  Lookup by displayName failed. $_"
+        }
+    }
+
+    if ($existingGroup) {
+        $groupId = $existingGroup.id
+        Write-Output "  Group already exists (Id: $groupId). Updating description if needed."
+        if ($existingGroup.description -ne $description) {
+            $body = @{ description = $description } | ConvertTo-Json
+            try {
+                Invoke-RestMethod -Uri "$graphBase/groups/$groupId" -Method Patch -Headers $headers -Body $body
+                Write-Output "  Description updated."
+            }
+            catch {
+                Write-Warning "  Failed to update description. $_"
+            }
+        }
+    }
+    else {
+        Write-Output "  Creating new security group..."
+        $body = @{
+            displayName     = $displayName
+            description     = $description
+            mailEnabled     = $false
+            mailNickname    = $mailNickname
+            securityEnabled = $true
+        } | ConvertTo-Json
+
+        try {
+            $createResponse = Invoke-RestMethod -Uri "$graphBase/groups" -Method Post -Headers $headers -Body $body
+            $groupId = $createResponse.id
+            Write-Output "  Group created. Id: $groupId."
+        }
+        catch {
+            Write-Warning "  Failed to create group '$displayName'. $_"
+            continue
+        }
+    }
+
+    # Retrieve existing owners
+    $existingOwnerIds = @()
+    try {
+        $ownersResponse = Invoke-RestMethod -Uri "$graphBase/groups/$groupId/owners`?\$select=id&\$top=999" -Method Get -Headers $headers
+        if ($ownersResponse.value) {
+            $existingOwnerIds = $ownersResponse.value.id
+        }
+    }
+    catch {
+        Write-Warning "  Could not retrieve existing owners. $_"
+    }
+
+    foreach ($ownerUpn in $globalOwners) {
+        $ownerUpnTrimmed = Get-TrimmedOrNull $ownerUpn
+        if ([string]::IsNullOrWhiteSpace($ownerUpnTrimmed)) { continue }
+
+        try {
+            $escapedUpn = $ownerUpnTrimmed.Replace("'", "''")
+            $userUri = "$graphBase/users`?\$filter=userPrincipalName eq '$escapedUpn'&\$select=id,userPrincipalName&\$top=1"
+            $userResponse = Invoke-RestMethod -Uri $userUri -Method Get -Headers $headersConsistency
+
+            if (-not $userResponse.value) {
+                Write-Warning "    Owner $ownerUpnTrimmed not found."
+                continue
+            }
+
+            $ownerId = $userResponse.value[0].id
+
+            if ($existingOwnerIds -contains $ownerId) {
+                Write-Output "    $ownerUpnTrimmed already an owner."
+                continue
+            }
+
+            $body = @{ "@odata.id" = "$graphBase/directoryObjects/$ownerId" } | ConvertTo-Json
+            Invoke-RestMethod -Uri "$graphBase/groups/$groupId/owners/$ref" -Method Post -Headers $headers -Body $body
+            Write-Output "    Added $ownerUpnTrimmed as owner."
+        }
+        catch {
+            Write-Warning "    Failed to add owner $ownerUpnTrimmed. $_"
+        }
+    }
+
+    Write-Output "  Finished group '$displayName'."
+}
+
+Write-Output "=== Run completed at $(Get-Date -Format u) ==="

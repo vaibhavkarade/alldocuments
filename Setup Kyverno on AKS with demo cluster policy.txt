@@ -1,0 +1,45 @@
+1) Setup AKS in azure with helm, azure cli and kubectl
+
+2) connect to AKS
+
+3) Install kyverno using helm
+helm install kyverno kyverno/kyverno -n kyverno --create-namespace --set config.webhookAnnotations."admissions\.enforcer/disabled"="true"
+
+4) there are 5 resources getting installed with kyverno
+  kyverno admission controller
+  kyverno background controller
+  kyverno cleanup controller
+  kyverno reports controller
+  CRD (Custom resource definition)
+
+5)For testing you can create a cluster policy 
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-team-label
+spec:
+  validationFailureAction: enforce
+  rules:
+    - name: check-team-label
+      match:
+        resources:
+          kinds:
+            - Pod
+      validate:
+        message: "Pods must have a 'team' label."
+        pattern:
+          metadata:
+            labels:
+              team: "?*"
+
+
+6) If we create pod without label "team", it wont work due to cluster policy by kyverno
+kubectl run nginx --image=nginx
+
+7)kubectl run nginx-labeled --image=nginx --labels team=backend     ---It will work
+
+8)to view policy reports
+kubectl get policyreport -A
+
+
+

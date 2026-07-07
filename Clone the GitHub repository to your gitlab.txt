@@ -1,0 +1,12 @@
+Clone the GitHub repository to your local machine:
+git clone <GitHub_repository_URL>
+
+Change directory into the cloned repository:
+cd <repository_name>
+
+Create a new repository on GitLab:
+Go to your GitLab account and create a new project/repository.
+
+git remote add gitlab <GitLab_repository_URL>
+
+git push gitlab master

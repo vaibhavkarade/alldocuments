@@ -1,0 +1,36 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('checkout') {
+            steps {
+                checkout scmGit(branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/vaibhavkarade/python-webapp.git']])
+            }
+        }
+        stage('Docker build') {
+            steps {
+               sh 'make image' 
+            }
+        }
+        stage('push image') {
+            steps {
+                script {
+                  withDockerRegistry(credentialsId: 'dockerhub', toolName: 'docker') {
+                sh ' make push'
+                
+}  
+                }
+            }
+    }
+    stage('deploy container') {
+            steps {
+                script {
+                  withDockerRegistry(credentialsId: 'dockerhub', toolName: 'docker') {
+                sh 'docker run -d --rm -it -p 5000:5000 vaibhavkarade/python-demoapp:latest'
+                
+}  
+                }
+            }
+    }
+}
+}

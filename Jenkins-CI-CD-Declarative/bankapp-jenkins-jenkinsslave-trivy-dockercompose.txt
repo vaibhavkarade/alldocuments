@@ -1,0 +1,74 @@
+pipeline {
+    agent {label 'jenkins-slave'}
+    
+    tools{
+        jdk 'JDK'
+        nodejs 'node16'
+        
+    }
+    
+    environment{
+        SCANNER_HOME= tool 'sonar-scanner'
+    }
+    
+    stages {
+        stage('Git Checkout') {
+            steps {
+                checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/vaibhavkarade/bank-app.git']])
+            }
+        }
+        
+        stage('OWASP FS SCAN') {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./app/backend --disableYarnAudit --disableNodeAudit', odcInstallation: 'DP'
+                    dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        }
+        
+        stage('TRIVY FS SCAN') {
+            steps {
+                sh "trivy fs ."
+            }
+        }
+        
+        stage('SONARQUBE ANALYSIS') {
+            steps {
+                 sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.url=http://52.224.0.180:9000/ -Dsonar.login=squ_dada8aaed2c2a5110baa3ac0c5240abae73a1c7a -Dsonar.projectName=bank-app \
+              -Dsonar.java.binaries=. \
+              -Dsonar.projectKey=bank-app '''
+                }
+            }
+        
+        
+        
+         stage('Install Dependencies') {
+            steps {
+                sh "npm install"
+            }
+        }
+        
+        stage('Backend') {
+            steps {
+                dir('/var/lib/jenkins/workspace/workspace/bank-app/app/backend') {
+                    sh "npm install"
+                }
+            }
+        }
+        
+        stage('frontend') {
+            steps {
+                dir('/var/lib/jenkins/workspace/workspace/bank-app/app/frontend') {
+                    sh "npm install"
+                }
+            }
+        }
+        
+        stage('Deploy to Conatiner') {
+            steps {
+                dir('/var/lib/jenkins/workspace/workspace/bank-app/app') {
+                sh "npm run compose:up -d"
+            }
+        }
+        }
+    }
+}

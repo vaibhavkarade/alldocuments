@@ -1,0 +1,16 @@
+---
+- name: Install Prometheus and Grafana
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Install Prometheus
+      ansible.builtin.package:
+        name: prometheus
+        state: present
+
+    - name: Start Prometheus service
+      ansible.builtin.service:
+        name: prometheus
+        state: started
+        enabled: yes

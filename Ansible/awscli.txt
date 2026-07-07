@@ -1,0 +1,10 @@
+---
+- name: Install AWS CLI
+  hosts: all
+  become: yes  # Use elevated privileges
+
+  tasks:
+    - name: Install AWS CLI
+      pip:
+        name: awscli
+        state: present

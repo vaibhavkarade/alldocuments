@@ -1,0 +1,58 @@
+#!/bin/bash
+
+# Jenkins Build Logs Directory
+JENKINS_LOG_DIR="/var/lib/jenkins/jobs"
+STORAGE_ACCOUNT_NAME="stjenkinslogs"
+STORAGE_CONTAINER_NAME="jenkins-logs"
+AZURE_STORAGE_KEY="s5aw5EmZ5P9lqUW/b6KiaWZUsbx6OJMweXLRmph0AbaF+cV38aZ+nYFPUsIG4IOmt8f6JePSbuQD+AStKNfAkQ=="
+
+# Define the target date manually (YYYY-MM-DD format)
+FILTER_DATE="2025-02-13"  # Change this date as needed
+
+echo "Starting the process to upload Jenkins build logs to Azure Blob Storage..."
+echo "Filtering logs for builds created on: $FILTER_DATE"
+
+# Loop through all Jenkins jobs
+for job in $(find $JENKINS_LOG_DIR -maxdepth 1 -mindepth 1 -type d); do
+    JOB_NAME=$(basename $job)
+    BUILD_DIR="$job/builds"
+
+    # Check if the builds directory exists
+    if [[ ! -d "$BUILD_DIR" ]]; then
+        echo "No builds found for job: $JOB_NAME"
+        continue
+    fi
+
+    # Loop through all builds inside the job
+    for build_path in "$BUILD_DIR"/*/; do
+        BUILD_NUMBER=$(basename "$build_path")
+        BUILD_LOG_FILE="$build_path/log"
+
+        # Check if log file exists
+        if [[ -f "$BUILD_LOG_FILE" ]]; then
+            # Get the build's last modified date
+            BUILD_DATE=$(stat -c %y "$BUILD_LOG_FILE" | cut -d ' ' -f1)
+
+            if [[ "$BUILD_DATE" == "$FILTER_DATE" ]]; then
+                echo "Uploading log for job: $JOB_NAME, Build #$BUILD_NUMBER (Date: $BUILD_DATE)..."
+
+                upload_result=$(az storage blob upload \
+                    --account-name $STORAGE_ACCOUNT_NAME \
+                    --container-name $STORAGE_CONTAINER_NAME \
+                    --file "$BUILD_LOG_FILE" \
+                    --name "$JOB_NAME-build-$BUILD_NUMBER-$BUILD_DATE.txt" \
+                    --account-key $AZURE_STORAGE_KEY 2>&1)
+
+                if [[ $? -eq 0 ]]; then
+                    echo "Successfully uploaded: $JOB_NAME Build #$BUILD_NUMBER"
+                else
+                    echo "Error uploading log for $JOB_NAME Build #$BUILD_NUMBER: $upload_result"
+                fi
+            else
+                echo "Skipping $JOB_NAME Build #$BUILD_NUMBER (Date: $BUILD_DATE does not match $FILTER_DATE)"
+            fi
+        fi
+    done
+done
+
+echo "Process completed. All matching logs have been uploaded to Azure Blob Storage."

@@ -1,0 +1,118 @@
+- name: Backup MongoDB, upload to Azure Blob Storage, and restore on the new machine
+  hosts: mongodb  # Define the source MongoDB machine for the backup
+  become: yes
+  vars_files:
+    - restore-vars.yml  # Import variables from vars.yml
+
+  tasks:
+    # Backup MongoDB and upload to Azure Blob Storage
+    - name: Add MongoDB repository
+      apt_key:
+        url: https://www.mongodb.org/static/pgp/server-6.0.asc
+        state: present
+
+    - name: Add MongoDB list file
+      apt_repository:
+        repo: "deb [arch=amd64] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/6.0 multiverse"
+        state: present
+
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install MongoDB
+      apt:
+        name: mongodb-org
+        state: present
+
+    - name: Create backup directory
+      file:
+        path: "{{ mongodb_backup_dir }}"
+        state: directory
+
+    - name: Take MongoDB backup using mongodump
+      command: >
+        mongodump --archive={{ mongodb_backup_dir }}/backup.gz --gzip
+      args:
+        creates: "{{ mongodb_backup_dir }}/backup.gz"
+
+    - name: Install Azure CLI
+      apt:
+        name: azure-cli
+        state: present
+
+    - name: Login to Azure using Service Principal
+      shell: |
+        az login --service-principal -u {{ azure_app_id }} -p {{ azure_password }} --tenant {{ azure_tenant_id }}
+
+    # Set the blob name in the desired format
+    - name: Generate the blob name based on current timestamp
+      set_fact:
+        azure_blob_name: "mongodb_backup_{{ ansible_date_time.iso8601 | regex_replace('[:T]', '_') | regex_replace('[-]', '_') | regex_replace('[.]', '_') }}.gz"
+
+    - name: Upload MongoDB backup to Azure Blob Storage
+      shell: |
+        az storage blob upload --account-name {{ azure_storage_account_name }} \
+        --container-name {{ azure_container_name }} \
+        --file {{ mongodb_backup_dir }}/backup.gz \
+        --name {{ azure_blob_name }} --auth-mode login
+
+    - name: Clean up backup directory
+      file:
+        path: "{{ mongodb_backup_dir }}"
+        state: absent
+
+- name: Restore MongoDB backup from Azure Blob Storage to the new machine
+  hosts: newmongodb  # We now reference the target machine dynamically
+  become: yes
+  vars_files:
+    - vars.yml  # Import variables from vars.yml
+
+  tasks:
+    - name: Install MongoDB on the new machine
+      apt:
+        name: mongodb-org
+        state: present
+
+    - name: Install Azure CLI on the new machine
+      apt:
+        name: azure-cli
+        state: present
+
+    - name: Login to Azure using Service Principal on the new machine
+      shell: |
+        az login --service-principal -u {{ azure_app_id }} -p {{ azure_password }} --tenant {{ azure_tenant_id }}
+
+    # List blobs and get the latest backup file name in the specified format
+    - name: List blobs and get the latest backup file name
+      shell: |
+        az storage blob list --account-name {{ azure_storage_account_name }} \
+        --container-name {{ azure_container_name }} --auth-mode login --query "[].name" -o tsv | sort | tail -n 1
+      register: latest_blob_name
+
+    - name: Debug the latest backup blob name
+      debug:
+        var: latest_blob_name.stdout
+
+    # Download the MongoDB backup using the latest blob name
+    - name: Download MongoDB backup from Azure Blob Storage to the new machine
+      shell: |
+        az storage blob download --account-name {{ azure_storage_account_name }} \
+        --container-name {{ azure_container_name }} \
+        --name {{ latest_blob_name.stdout }} \
+        --file /tmp/backup.gz --auth-mode login
+
+    - name: Restore MongoDB backup using mongorestore
+      command: >
+        mongorestore --gzip --archive=/tmp/backup.gz
+
+    # Ensure the downloaded backup file is not deleted
+    - name: Ensure the backup file is present on the new machine
+      stat:
+        path: /tmp/backup.gz
+      register: backup_file_stat
+
+    - name: Debug backup file presence
+      debug:
+        msg: "The backup file is present at /tmp/backup.gz"
+      when: backup_file_stat.stat.exists

@@ -1,0 +1,16 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pool:
+  name: ansible-agent-pool  # This is the self-hosted agent pool you created
+
+steps:
+- task: Bash@3
+  displayName: 'Run Ansible Playbook for MongoDB Backup and Restore'
+  inputs:
+    targetType: 'inline'
+    script: |
+      cd $(Build.SourcesDirectory)  # Navigate to your repo directory
+      ansible-playbook restore_mongodbnew.yml  # Run your playbook

@@ -1,0 +1,38 @@
+pipeline {
+    agent any
+    tools {
+        maven 'MAVEN'
+    }
+
+    environment {
+        REMOTE_SERVER = '104.211.19.102'
+        REMOTE_USER = 'bunty'
+        JAR_FILE_NAME = '**/*.jar'
+        REMOTE_DESTINATION_PATH = '/opt/tomcat/webapps'
+    }
+
+    stages {
+        stage('Checkout and Build') {
+            steps {
+                checkout scm
+                sh 'mvn clean package'
+            }
+        }
+
+        stage('Deploy to Remote Server') {
+            steps {
+                script {
+                    def jarFileName = sh(script: 'ls target/*.jar | head -n 1', returnStdout: true).trim()
+
+                    if (jarFileName) {
+                        echo "Copying ${jarFileName} to remote server..."
+                        sh "scp -o StrictHostKeyChecking=no ${jarFileName} ${REMOTE_USER}@${REMOTE_SERVER}:${REMOTE_DESTINATION_PATH}/${JAR_FILE_NAME}"
+                        echo "Deployed ${jarFileName} to remote server."
+                    } else {
+                        error "No JAR file found in target directory."
+                    }
+                }
+            }
+        }
+    }
+}

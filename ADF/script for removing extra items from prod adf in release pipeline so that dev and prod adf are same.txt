@@ -1,0 +1,47 @@
+# Variables for resource group and factory names
+resourceGroup="<Prod-Resource-Group-Name>"
+factoryName="<Prod-ADF-Name>"
+devResourceGroup="<Dev-Resource-Group-Name>"
+devFactoryName="<Dev-ADF-Name>"
+
+# ---- Pipelines ----
+
+# Get list of pipelines in prod and dev
+prodPipelines=$(az datafactory pipeline list --resource-group $resourceGroup --factory-name $factoryName --query [].name --output tsv)
+devPipelines=$(az datafactory pipeline list --resource-group $devResourceGroup --factory-name $devFactoryName --query [].name --output tsv)
+
+# Compare and delete pipelines that exist in prod but not in dev
+for pipeline in $prodPipelines; do
+    if [[ ! " $devPipelines " =~ " $pipeline " ]]; then
+        echo "Deleting extra pipeline: $pipeline"
+        az datafactory pipeline delete --resource-group $resourceGroup --factory-name $factoryName --name $pipeline --yes
+    fi
+done
+
+# ---- Datasets ----
+
+# Get list of datasets in prod and dev
+prodDatasets=$(az datafactory dataset list --resource-group $resourceGroup --factory-name $factoryName --query [].name --output tsv)
+devDatasets=$(az datafactory dataset list --resource-group $devResourceGroup --factory-name $devFactoryName --query [].name --output tsv)
+
+# Compare and delete datasets that exist in prod but not in dev
+for dataset in $prodDatasets; do
+    if [[ ! " $devDatasets " =~ " $dataset " ]]; then
+        echo "Deleting extra dataset: $dataset"
+        az datafactory dataset delete --resource-group $resourceGroup --factory-name $factoryName --name $dataset --yes
+    fi
+done
+
+# ---- Triggers ----
+
+# Get list of triggers in prod and dev
+prodTriggers=$(az datafactory trigger list --resource-group $resourceGroup --factory-name $factoryName --query [].name --output tsv)
+devTriggers=$(az datafactory trigger list --resource-group $devResourceGroup --factory-name $devFactoryName --query [].name --output tsv)
+
+# Compare and delete triggers that exist in prod but not in dev
+for trigger in $prodTriggers; do
+    if [[ ! " $devTriggers " =~ " $trigger " ]]; then
+        echo "Deleting extra trigger: $trigger"
+        az datafactory trigger delete --resource-group $resourceGroup --factory-name $factoryName --name $trigger --yes
+    fi
+done

@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# Specify the desired version of JFrog Artifactory
+version="7.31.5"
+
+# Install OpenJDK
+sudo apt update
+sudo apt install -y openjdk-11-jdk
+
+# Download JFrog Artifactory package
+wget -O /tmp/artifactory.deb "https://bintray.com/jfrog/artifactory-debs/download_file?file_path=pool/main/j/artifactory/artifactory-${version}.deb"
+
+# Install JFrog Artifactory
+sudo dpkg -i /tmp/artifactory.deb
+
+# Start JFrog Artifactory service
+sudo systemctl start artifactory
+
+# Enable auto-start on boot
+sudo systemctl enable artifactory
+
+# Clean up downloaded package
+rm /tmp/artifactory.deb

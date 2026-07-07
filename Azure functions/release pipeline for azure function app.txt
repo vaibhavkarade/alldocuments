@@ -1,0 +1,31 @@
+#Your build pipeline references an undefined variable named ‘StartupCommand’. Create or edit the build pipeline for this YAML file, define the variable on the Variables tab. See https://go.microsoft.com/fwlink/?linkid=865972
+variables:
+  AzureSubscription: '652435c5-6fae-4c76-b46d-5d17c52a38ce'
+  AppType: 'functionAppLinux'
+  AppName: 'funci-cd'
+  DeployToSlotOrASEFlag: 'true'
+  ResourceGroupName: 'fundemo'
+  SlotName: 'stage'
+
+steps:
+- task: AzureFunctionApp@1
+  displayName: 'Deploy Azure Function App'
+  inputs:
+    azureSubscription: '$(Parameters.AzureSubscription)'
+    appType: '$(Parameters.AppType)'
+    appName: '$(Parameters.AppName)'
+    deployToSlotOrASE: '$(Parameters.DeployToSlotOrASEFlag)'
+    resourceGroupName: '$(Parameters.ResourceGroupName)'
+    slotName: '$(Parameters.SlotName)'
+    startUpCommand: '$(Parameters.StartupCommand)'
+
+
+
+- task: AzureAppServiceManage@0
+  displayName: 'Function App - Slot Swap'
+  inputs:
+    azureSubscription: '$(Parameters.AzureSubscription)'
+    WebAppName: '$(Parameters.AppName)'
+    ResourceGroupName: '$(Parameters.ResourceGroupName)'
+    SourceSlot: '$(Parameters.SlotName)'
+    SwapWithProduction: True

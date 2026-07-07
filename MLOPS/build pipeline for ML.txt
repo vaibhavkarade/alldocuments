@@ -1,0 +1,35 @@
+# azure-pipelines-build.yml
+trigger:
+- main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  pythonVersion: '3.x'
+
+steps:
+- task: UsePythonVersion@0
+  inputs:
+    versionSpec: '$(pythonVersion)'
+
+- script: |
+    python -m venv venv
+    source venv/bin/activate
+    pip install -r requirements.txt
+  displayName: 'Set up Python environment'
+
+- script: |
+    source venv/bin/activate
+    python src/train.py
+  displayName: 'Train Model'
+
+- script: |
+    source venv/bin/activate
+    python src/evaluate.py
+  displayName: 'Evaluate Model'
+
+- task: PublishBuildArtifacts@1
+  inputs:
+    artifactName: 'model'
+    targetPath: '$(Build.ArtifactStagingDirectory)/outputs'

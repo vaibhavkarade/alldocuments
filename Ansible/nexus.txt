@@ -1,0 +1,19 @@
+---
+- name: Install Nexus container
+  hosts: all
+  become: yes
+  tasks:
+    - name: Pull Nexus Docker image
+      docker_image:
+        name: sonatype/nexus3
+        source: pull
+        state: present
+
+    - name: Run Nexus container
+      docker_container:
+        name: nexus
+        image: sonatype/nexus3
+        ports:
+          - "8081:8081"  # Adjust the port mappings as needed
+        volumes:
+          - "/path/to/nexus_data:/nexus-data"  # Mount a volume for persistent data

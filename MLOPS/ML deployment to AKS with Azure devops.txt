@@ -1,0 +1,53 @@
+trigger:
+  branches:
+    include:
+      - main
+
+variables:
+  dockerRegistryServiceConnection: 'your-azure-container-registry-connection-name'
+  dockerImageName: 'your-docker-image-name'
+  dockerImageTag: 'latest'
+  kubernetesNamespace: 'your-kubernetes-namespace'
+  kubernetesServiceConnection: 'your-aks-connection-name'
+  kubernetesDeploymentName: 'your-deployment-name'
+  kubernetesContainerName: 'your-container-name'
+
+stages:
+- stage: Deploy
+  displayName: Deploy to AKS
+  jobs:
+  - deployment: Deploy
+    displayName: Deploy
+    pool:
+      vmImage: 'ubuntu-latest'
+    environment: 'your-aks-environment-name'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: KubernetesManifest@0
+            displayName: 'Deploy to AKS'
+            inputs:
+              action: 'deploy'
+              kubernetesServiceConnection: '$(kubernetesServiceConnection)'
+              namespace: '$(kubernetesNamespace)'
+              manifests: |
+                apiVersion: apps/v1
+                kind: Deployment
+                metadata:
+                  name: $(kubernetesDeploymentName)
+                spec:
+                  replicas: 1
+                  selector:
+                    matchLabels:
+                      app: $(kubernetesDeploymentName)
+                  template:
+                    metadata:
+                      labels:
+                        app: $(kubernetesDeploymentName)
+                    spec:
+                      containers:
+                      - name: $(kubernetesContainerName)
+                        image: $(dockerRegistryServiceConnection).azurecr.io/$(dockerImageName):$(dockerImageTag)
+                        ports:
+                        - containerPort: 80

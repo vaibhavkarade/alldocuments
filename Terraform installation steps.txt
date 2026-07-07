@@ -1,0 +1,8 @@
+Terraform installation steps:
+
+1) Download Terraform xip file and extract it in one folder : Terraform
+2)install VS code and install extension for terraform
+3)open the terraform folder, check the version :terraform -v  and start creating main.tf files for infra
+4)In Azure AD, create app called Terraform in app registrations, generate the secret for it 
+5)add the details like tennantiD, secret ID(value), sub ID, client ID
+6)go to specific subscription, add roles and provide contributor access to created app(terraform) to access subscription

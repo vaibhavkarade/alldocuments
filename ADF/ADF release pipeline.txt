@@ -1,0 +1,11 @@
+steps:
+- task: AzureResourceManagerTemplateDeployment@3
+  displayName: 'ARM Template deployment: Resource Group scope'
+  inputs:
+    azureResourceManagerConnection: 'My_Azure_Subscription (777b3b2f-bf8f-4d31-8fe9-1c4911fba328)'
+    subscriptionId: '777b3b2f-bf8f-4d31-8fe9-1c4911fba328'
+    resourceGroupName: prod
+    location: 'East US'
+    csmFile: '$(System.DefaultWorkingDirectory)/_adf-ci-cd/adf-dev-DevOps123/ARMTemplateForFactory.json'
+    csmParametersFile: '$(System.DefaultWorkingDirectory)/_adf-ci-cd/adf-dev-DevOps123/ARMTemplateParametersForFactory.json'
+    overrideParameters: '-factoryName "adf-prod-DevOps123" -LSdevkv_properties_typeProperties_baseUrl "https://kvproddevops123.vault.azure.net/" -LSdevst_properties_typeProperties_connectionString_secretName "kvprodsecret"'

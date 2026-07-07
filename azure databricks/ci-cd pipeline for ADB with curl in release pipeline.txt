@@ -1,0 +1,51 @@
+trigger:
+- main
+
+variables:
+- group: DatabricksSecrets  # Variable group containing secrets for both dev and prod
+
+stages:
+- stage: Build
+  jobs:
+  - job: Build
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.x'
+    - script: |
+        python -m venv venv
+        source venv/bin/activate
+        pip install -r requirements.txt
+      displayName: 'Install dependencies'
+
+- stage: Deploy_Dev
+  dependsOn: Build
+  jobs:
+  - job: Deploy_Dev
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - script: |
+        curl -v -X PATCH https://<dev-databricks-instance>.azuredatabricks.net/api/2.0/repos/<dev-repository-id> \
+        -H "Authorization: Bearer $(DATABRICKS_DEV_TOKEN)" \
+        -d "{\"branch\":\"development\"}"
+      env:
+        DATABRICKS_DEV_TOKEN: $(DATABRICKS_DEV_TOKEN)
+      displayName: 'Deploy to Databricks Dev'
+
+- stage: Deploy_Prod
+  dependsOn: Build
+  jobs:
+  - job: Deploy_Prod
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - script: |
+        curl -v -X PATCH https://<prod-databricks-instance>.azuredatabricks.net/api/2.0/repos/<prod-repository-id> \
+        -H "Authorization: Bearer $(DATABRICKS_PROD_TOKEN)" \
+        -d "{\"branch\":\"main\"}"
+      env:
+        DATABRICKS_PROD_TOKEN: $(DATABRICKS_PROD_TOKEN)
+      displayName: 'Deploy to Databricks Prod'

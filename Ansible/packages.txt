@@ -1,0 +1,20 @@
+---
+- name: Install sample packages
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Install htop package
+      apt:
+        name: htop
+        state: present
+
+    - name: Install curl package
+      apt:
+        name: curl
+        state: present
+
+    - name: Install vim package
+      apt:
+        name: vim
+        state: present

@@ -1,0 +1,177 @@
+# ------------------ CONFIGURATION ------------------
+Write-Output "Starting Azure Idle Resources script setup process..."
+
+# Configurable variables
+$subscriptionId = "8172f712-63ee-44d9-8b59-3fa257b9dcbd"  # Change this to your subscription ID
+$location = "eastus"                                      # Specify the location where resources will be provisioned
+$resourceGroup = "rg-cost-optimization-test"              # Resource group name
+$uniqueSuffix = (Get-Date -Format "yyyyMMddHHmmss")       # Generates a unique suffix based on timestamp for NAME uniqueness
+
+# Resource Names
+$vmName = "testIdleVM"
+$storageAccountName = "idlestorage$uniqueSuffix"
+$appServicePlan = "testAppServicePlan"
+$webAppName = "idlewebapp$uniqueSuffix"
+$sqlServerName = "sqlidle$uniqueSuffix"
+$sqlDbName = "idledb"
+$keyVaultName = "kv-idle-$uniqueSuffix"
+$recoveryVaultName = "idle-recovery-vault"
+$lbName = "idleLB"
+$agwName = "idleAppGateway"
+
+# Tags (used for all resources)
+$tags = @{Purpose="IdleTest"; Environment="Development"}  # Common tags for resources
+
+# Set Azure Subscription Context
+Write-Output "Logging into your Azure subscription..."
+Set-AzContext -SubscriptionId $subscriptionId
+
+# ------------------ CREATE RESOURCE GROUP ------------------
+Write-Output "Creating resource group..."
+if (-not (Get-AzResourceGroup -Name $resourceGroup -ErrorAction SilentlyContinue)) {
+    New-AzResourceGroup -Name $resourceGroup -Location $location -Tag $tags
+    Write-Output "✅ Resource group '$resourceGroup' created."
+} else {
+    Write-Output "⚠️ Resource group '$resourceGroup' already exists."
+}
+
+# ------------------ CREATE IDLE VIRTUAL MACHINE ------------------
+try {
+    Write-Output "Creating idle Virtual Machine..."
+    # Create Virtual Network and Subnet
+    $vnet = New-AzVirtualNetwork -Name "$vmName-vnet" `
+        -ResourceGroupName $resourceGroup `
+        -Location $location `
+        -AddressPrefix "10.0.0.0/16" `
+        -Subnet @(New-AzVirtualNetworkSubnetConfig -Name "default" -AddressPrefix "10.0.0.0/24")
+    $subnetId = ($vnet.Subnets | Where-Object { $_.Name -eq "default" }).Id
+
+    # Create Network Interface
+    $nic = New-AzNetworkInterface -Name "$vmName-nic" `
+        -ResourceGroupName $resourceGroup `
+        -Location $location `
+        -SubnetId $subnetId
+
+    # VM Credentials
+    $cred = Get-Credential -Message "Enter credentials for the VM"
+
+    # Create VM Configuration
+    $vmConfig = New-AzVMConfig -VMName $vmName -VMSize "Standard_B1s" `
+        | Set-AzVMOperatingSystem -Windows -ComputerName $vmName -Credential $cred -ProvisionVMAgent -EnableAutoUpdate `
+        | Add-AzVMNetworkInterface -Id $nic.Id `
+        | Set-AzVMSourceImage -PublisherName "MicrosoftWindowsServer" -Offer "WindowsServer" -Skus "2019-Datacenter" -Version "latest"
+
+    # Deploy the VM and Stop
+    New-AzVM -ResourceGroupName $resourceGroup -Location $location -VM $vmConfig
+    Stop-AzVM -ResourceGroupName $resourceGroup -Name $vmName -Force
+    Write-Output "✅ Idle VM '$vmName' created and stopped."
+} catch {
+    Write-Output "❌ Failed to create idle VM. Error: $_"
+}
+
+# ------------------ CREATE UNATTACHED MANAGED DISK ------------------
+try {
+    Write-Output "Creating unattached managed disk..."
+    New-AzDisk -ResourceGroupName $resourceGroup -DiskName "unattachedDisk" -DiskSizeGB 10 -Location $location -CreationData @{CreateOption = "Empty"} -Tag $tags
+    Write-Output "✅ Unattached managed disk created."
+} catch {
+    Write-Output "❌ Failed to create unattached managed disk. Error: $_"
+}
+
+# ------------------ CREATE UNASSOCIATED PUBLIC IP ------------------
+try {
+    Write-Output "Creating unassociated public IP..."
+    New-AzPublicIpAddress -Name "unassociatedPIP" -ResourceGroupName $resourceGroup -Location $location -AllocationMethod Static -Tag $tags
+    Write-Output "✅ Unassociated public IP created."
+} catch {
+    Write-Output "❌ Failed to create unassociated public IP. Error: $_"
+}
+
+# ------------------ CREATE STOPPED APP SERVICE ------------------
+try {
+    Write-Output "Creating idle App Service..."
+    New-AzAppServicePlan -Name $appServicePlan -Location $location -ResourceGroupName $resourceGroup -Tier "Free" -NumberofWorkers 1 -Tag $tags
+    New-AzWebApp -Name $webAppName -Location $location -AppServicePlan $appServicePlan -ResourceGroupName $resourceGroup -Tag $tags
+    Stop-AzWebApp -ResourceGroupName $resourceGroup -Name $webAppName
+    Write-Output "✅ Idle App Service created and stopped."
+} catch {
+    Write-Output "❌ Failed to create idle App Service. Error: $_"
+}
+
+# ------------------ CREATE STORAGE ACCOUNT ------------------
+try {
+    Write-Output "Creating storage account..."
+    New-AzStorageAccount -ResourceGroupName $resourceGroup -Name $storageAccountName -Location $location -SkuName "Standard_LRS" -Kind "StorageV2" -Tag $tags
+    Write-Output "✅ Storage account '$storageAccountName' created."
+} catch {
+    Write-Output "❌ Failed to create storage account. Error: $_"
+}
+
+# ------------------ CREATE SQL DATABASE ------------------
+try {
+    Write-Output "Creating idle SQL Server and Database..."
+    $sqlCred = Get-Credential -Message "Enter SQL admin credentials"
+    New-AzSqlServer -ResourceGroupName $resourceGroup -ServerName $sqlServerName -Location $location -SqlAdministratorCredentials $sqlCred -Tag $tags
+    New-AzSqlDatabase -ResourceGroupName $resourceGroup -ServerName $sqlServerName -DatabaseName $sqlDbName -Edition "Basic" -Tag $tags
+    Write-Output "✅ SQL Server and idle Database created."
+} catch {
+    Write-Output "❌ Failed to create SQL Server or Database. Error: $_"
+}
+
+# ------------------ CREATE EMPTY KEY VAULT ------------------
+try {
+    Write-Output "Creating Key Vault..."
+    New-AzKeyVault -VaultName $keyVaultName -ResourceGroupName $resourceGroup -Location $location -EnabledForDeployment -Tag $tags
+    Write-Output "✅ Key Vault '$keyVaultName' created."
+} catch {
+    Write-Output "❌ Failed to create Key Vault. Error: $_"
+}
+
+# ------------------ CREATE RECOVERY SERVICES VAULT ------------------
+try {
+    Write-Output "Creating Recovery Services Vault..."
+    New-AzRecoveryServicesVault -Name $recoveryVaultName -ResourceGroupName $resourceGroup -Location $location -Tag $tags
+    Write-Output "✅ Recovery Services Vault created."
+} catch {
+    Write-Output "❌ Failed to create Recovery Services Vault. Error: $_"
+}
+
+# ------------------ CREATE LOAD BALANCER ------------------
+try {
+    Write-Output "Creating idle Load Balancer..."
+    $publicIp = New-AzPublicIpAddress -ResourceGroupName $resourceGroup -Location $location -AllocationMethod Static -Name "lbPublicIp" -Tag $tags
+    $frontendIP = New-AzLoadBalancerFrontendIpConfig -Name "frontendConfig" -PublicIpAddress $publicIp
+    New-AzLoadBalancer -ResourceGroupName $resourceGroup -Name $lbName -Location $location -FrontendIpConfiguration $frontendIP -Tag $tags
+    Write-Output "✅ Load Balancer created."
+} catch {
+    Write-Output "❌ Failed to create Load Balancer. Error: $_"
+}
+
+# ------------------ CREATE APPLICATION GATEWAY ------------------
+try {
+    Write-Output "Creating idle Application Gateway..."
+    $vnet = New-AzVirtualNetwork -ResourceGroupName $resourceGroup -Location $location -Name "agw-vnet" `
+        -AddressPrefix "10.10.0.0/16" `
+        -Subnet @(New-AzVirtualNetworkSubnetConfig -Name "appgw-subnet" -AddressPrefix "10.10.1.0/24")
+    $subnet = Get-AzVirtualNetworkSubnetConfig -VirtualNetwork $vnet -Name "appgw-subnet"
+    $appGwPIP = New-AzPublicIpAddress -Name "agwPip" -ResourceGroupName $resourceGroup -Location $location -AllocationMethod Dynamic -Tag $tags
+    $gwIpConfig = New-AzApplicationGatewayIPConfiguration -Name "appGwIpConfig" -Subnet $subnet
+    $frontendPort = New-AzApplicationGatewayFrontendPort -Name "frontendPort" -Port 80
+    $frontendIPConfig = New-AzApplicationGatewayFrontendIPConfig -Name "frontendIP" -PublicIPAddress $appGwPIP
+    $sku = New-AzApplicationGatewaySku -Name "Standard_Small" -Tier "Standard" -Capacity 1
+
+    New-AzApplicationGateway -Name $agwName -ResourceGroupName $resourceGroup -Location $location `
+        -BackendAddressPools @() `
+        -FrontendPorts $frontendPort `
+        -FrontendIPConfigurations $frontendIPConfig `
+        -GatewayIPConfigurations $gwIpConfig `
+        -Sku $sku `
+        -Tag $tags
+    Write-Output "✅ Application Gateway created."
+} catch {
+    Write-Output "❌ Failed to create Application Gateway. Error: $_"
+}
+
+# ------------------ COMPLETION ------------------
+Write-Output "✅ All resources successfully created in resource group '$resourceGroup'."
+Write-Output "💡 Remember: Clean up resources when finished using 'Remove-AzResourceGroup -Name $resourceGroup -Force'."

@@ -1,0 +1,79 @@
+pipeline {
+    agent any
+    tools {
+        maven 'MAVEN'
+        jdk 'JDK'
+    }
+    environment {
+        SCANNER_HOME= tool 'sonar-scanner'
+    }
+    stages {
+        stage('checkout') {
+            steps {
+                checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/vaibhavkarade/ekart.git']])
+            }
+        }
+        stage('compile') {
+            steps {
+                sh 'mvn clean compile'
+            }
+        } 
+         stage('sonarqube') {
+            steps {
+              sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.url=http://40.71.190.248:9000/ -Dsonar.login=squ_730949d1b1e78fa5a091d9a53ccd474ce8eb43aa -Dsonar.projectName=shopping-cart \
+              -Dsonar.java.binaries=. \
+              -Dsonar.projectKey=shopping-cart '''
+            }
+        } 
+          stage('OWASP SCAN') {
+            steps {
+                dependencyCheck additionalArguments: ' --scan ./', odcInstallation: 'DP'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
+            }
+        } 
+           stage('build app') {
+            steps {
+                sh 'mvn clean install -DskipTests'
+            }
+        } 
+            stage('build and push image') {
+            steps {
+                script {
+                  withDockerRegistry(credentialsId: 'dockerhub', toolName: 'docker') {
+                sh 'docker build -t vaibhavkarade/shoppingapp /var/lib/jenkins/workspace/jenkins/docker '
+                sh 'docker push vaibhavkarade/shoppingapp'
+}  
+                }
+            }
+        } 
+            stage('CD pipeline') {
+            steps {
+                build job: "CD-pipeline"
+            }
+        } 
+    }
+}
+
+
+
+
+
+CD-pipeline
+
+
+pipeline {
+    agent any
+
+    stages {
+        stage('Hello') {
+            steps {
+              script {
+                  withDockerRegistry(credentialsId: 'dockerhub', toolName: 'docker') {
+                sh ' docker run -d --name shopping-app -p 8050:8050 vaibhavkarade/shoppingapp'
+}
+              }
+            }
+        }
+    }
+}
+

@@ -1,0 +1,82 @@
+stages:
+  - compile
+  - test
+  - scan
+  - analyze
+  - package
+  - build_push
+  - deploy
+
+variables:
+  MAVEN_OPTS: "-Dmaven.repo.local=$CI_PROJECT_DIR/.m2/repository"
+
+compile:
+  stage: compile
+  script:
+    - mvn compile -DskipTests=true
+  artifacts:
+    paths:
+      - target/
+    reports:
+      junit: **/surefire-reports/TEST-*.xml
+
+test:
+  stage: test
+  script:
+    - mvn test -DskipTests=true
+  artifacts:
+    paths:
+      - target/
+    reports:
+      junit: **/surefire-reports/TEST-*.xml
+
+scan:
+  stage: scan
+  image: aquasec/trivy:latest
+  script:
+    - trivy fs --format table -o trivy-fs-report.html .
+  artifacts:
+    paths:
+      - trivy-fs-report.html
+
+sonarqube_prepare:
+  stage: analyze
+  image: sonarsource/sonar-scanner-cli:latest
+  script:
+    - sonar-scanner -Dsonar.projectKey=mission -Dsonar.sources=. -Dsonar.java.binaries=.
+
+package:
+  stage: package
+  script:
+    - mvn package -DskipTests=true
+  artifacts:
+    paths:
+      - target/
+    reports:
+      junit: **/surefire-reports/TEST-*.xml
+
+build_and_push:
+  stage: build_push
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker build -t vaibhavkarade/mission1:latest .
+    - echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+    - docker push vaibhavkarade/mission1:latest
+
+run_docker_container:
+  stage: build_push
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker run -d --name mission -p 8080:8080 vaibhavkarade/mission1:latest
+
+deploy_to_k8s:
+  stage: deploy
+  script:
+    - kubectl apply -f ds.yml
+  only:
+    - main
+

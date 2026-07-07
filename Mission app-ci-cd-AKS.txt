@@ -1,0 +1,83 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- main
+
+pool:
+  name: mission
+
+steps:
+
+- task: Maven@4
+  inputs:
+    mavenPomFile: 'pom.xml'
+    goals: 'compile'
+    options: '-DskipTests=true'
+    publishJUnitResults: true
+    testResultsFiles: '**/surefire-reports/TEST-*.xml'
+    javaHomeOption: 'JDKVersion'
+    mavenVersionOption: 'Default'
+    mavenAuthenticateFeed: false
+    effectivePomSkip: false
+    sonarQubeRunAnalysis: false
+- task: Maven@4
+  inputs:
+    mavenPomFile: 'pom.xml'
+    goals: 'test'
+    options: '-DskipTests=true'
+    publishJUnitResults: true
+    testResultsFiles: '**/surefire-reports/TEST-*.xml'
+    javaHomeOption: 'JDKVersion'
+    mavenVersionOption: 'Default'
+    mavenAuthenticateFeed: false
+    effectivePomSkip: false
+    sonarQubeRunAnalysis: false
+- task: Bash@3
+  inputs:
+    targetType: 'inline'
+    script: 'trivy fs --format table -o trivy-fs-report.html .'
+- task: SonarQubePrepare@6
+  inputs:
+    SonarQube: 'sonar-connection'
+    scannerMode: 'CLI'
+    configMode: 'manual'
+    cliProjectKey: 'mission'
+    cliProjectName: 'mission'
+    cliSources: '.'
+    extraProperties: 'sonar.java.binaries= .'
+- task: SonarQubeAnalyze@6
+  inputs:
+    jdkversion: 'JAVA_HOME_17_X64'
+
+- task: Maven@4
+  inputs:
+    mavenPomFile: 'pom.xml'
+    goals: 'package'
+    options: '-DskipTests=true'
+    publishJUnitResults: true
+    testResultsFiles: '**/surefire-reports/TEST-*.xml'
+    javaHomeOption: 'JDKVersion'
+    mavenVersionOption: 'Default'
+    mavenAuthenticateFeed: false
+    effectivePomSkip: false
+    sonarQubeRunAnalysis: false
+- task: Docker@2
+  inputs:
+    containerRegistry: 'docker'
+    repository: 'vaibhavkarade/mission1'
+    command: 'buildAndPush'
+    Dockerfile: '**/Dockerfile'
+- task: Bash@3
+  inputs:
+        targetType: 'inline'
+        script: 'docker run -d --name mission -p 8080:8080 vaibhavkarade/mission1:45'
+- task: KubernetesManifest@1
+  inputs:
+    action: 'deploy'
+    connectionType: 'kubernetesServiceConnection'
+    kubernetesServiceConnection: 'AKS'
+    namespace: 'default'
+    manifests: 'ds.yml'

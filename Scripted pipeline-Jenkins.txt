@@ -1,0 +1,9 @@
+node {
+    stage ('build') {
+
+        }
+    stage ('Test') {
+
+    }
+    
+}

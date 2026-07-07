@@ -1,0 +1,31 @@
+[15:08] Chelukala, Maharshi (Contractor)
+Enterprise Data & Analytics Platform - UseCase Onboarding - All Documents (sharepoint.com)
+[15:09] Chelukala, Maharshi (Contractor)
+tracker Aubay - EPAM.xlsx (sharepoint.com)
+Transition Aubay to EPAM - Documents - All Documents (sharepoint.com)
+Enterprise Data & Analytics Platform - Administration - All Documents (sharepoint.com)
+Platform & Architecture Chapter - Decisions Repository - All Items (sharepoint.com)
+Copy of Physical Architecture • Reckitt (mural.co)
+1.1. Architecture management - Overview (azure.com)
+https://rbcom.sharepoint.com/sites/TrinityEnterpriseDataPlatform/SitePages/Tagging-Standards.aspx#tagging-components-of-shared-resources (new resource tagging agas jen)
+Trinity Platform Infrastructure Offerings (sharepoint.com) (Trinity Platform Infrastructure Offerings (Padbiarezski, Aleh))
+Trinity Security Groups (sharepoint.com) (Trinity Security Groups(Siqueira, JoseLeandro))
+4.1. Security Model - Overview (azure.com) ADO WIKI
+Security model for EDAP.docx (sharepoint.com) SHAREPOINT
+All requests to infra team should please go via the standard support request process
+RAM’s folder Question 1 - OneDrive (sharepoint.com)
+EPAM-RECKITT EPAM Reckitt Group - Home (sharepoint.com)
+To Create Service Account https://rbassist.service-now.com/it_homepage?id=sc_cat_item&table=sc_cat_item&sys_id=a5325b916f262a001265b1b3dd3ee4a9
+OFFICE 365 https://rbassist.service-now.com/it_homepage?id=sc_cat_item&table=sc_cat_item&sys_id=410a9dd9db8347408026f7b31d96197d
+O365 Licence agreement https://rbassist.service-now.com/ssp?id=sc_cat_item&sys_id=44ca142b1b8b48d0e237db12cd4bcb82&sysparm_category=52e69f5ddbb95c90dc484dc2ba961980
+CYBER ARK Password Vault (cyberark.com)
+https://rbcom.sharepoint.com/sites/TrinityEnterpriseDataPlatform/Lists/Solutions%20Repository/AllItems.aspx
+Other Tickets - https://rbassist.service-now.com/it_homepage?id=sc_cat_item&table=sc_cat_item&sys_id=0c2132d76f1f92007c9d9026eb3ee480
+Report an Issue: Report an Issue - Assist (service-now.com)
+https://app.mural.co/t/rb2184/m/rb2184/1677341081133/8eae546718fce0b59ac18534336842060c4d5071?sender=u7fa2abcbc2012577c39f2259
+Data Contract Template 23Feb2024.docx (sharepoint.com)
+ACCESS MANAGEMENT SHAREPOINT Platform & Architecture - Automation of Access Management Flow - All Documents (sharepoint.com)
+USECASE ONBOARDING SHAREPOINT  Enterprise Data & Analytics Platform - UseCase Onboarding - All Documents (sharepoint.com)
+Password Vault
+Security model for EDAP.docx
+tracker Aubay - EPAM.xlsx

@@ -1,0 +1,29 @@
+pipeline {
+    agent any
+    tools {
+        maven 'MAVEN'
+    }
+
+    stages {
+        stage('checkout') {
+            steps {
+                checkout scmGit(branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/Krishpluto/BoardgameListingWebApp.git']])
+            }
+        }
+        stage('Build') {
+            steps {
+                sh 'mvn clean'
+                sh 'mvn validate'
+                sh 'mvn compile'
+                sh 'mvn test'
+                sh 'mvn package'
+            }
+        }
+        stage('Deploy') {
+            steps {
+                sh 'java -Dserver.port=8888 -jar **/*.jar'
+                
+            }
+        }
+    }
+}

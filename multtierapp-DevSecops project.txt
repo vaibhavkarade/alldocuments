@@ -1,0 +1,103 @@
+pipeline {
+    agent any
+    
+    tools{
+        maven 'maven3'
+    }
+    
+    environment{
+        SCANNER_HOME=tool 'sonar-scanner'
+    }
+
+    stages {
+        stage('git checkout') {
+            steps {
+               git branch: 'main', url: 'https://github.com/vaibhavkarade/Multi-Tier-With-Database.git'
+            }
+        }
+        
+        stage('compile') {
+            steps {
+               sh "mvn compile"
+            }
+        }
+        
+        stage('test') {
+            steps {
+              sh "mvn test"
+            }
+        }
+        
+        stage('trivy fs scan') {
+            steps {
+               sh " trivy fs --format table -o fs.html ."
+            }
+        }
+        
+        stage('Sonarqube analysis') {
+            steps {
+               withSonarQubeEnv('sonar') {
+                 sh '$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectKey=multitierapp -Dsonar.projectName=multitierapp -Dsonar.java.binaries=target'
+               }
+            }
+        }
+        
+        stage('build the app') {
+            steps {
+               sh "mvn package"
+            }
+        }
+        
+        stage('publish to nexus') {
+            steps {
+               withMaven(globalMavenSettingsConfig: 'globalsettings', jdk: '', maven: 'maven3', mavenSettingsConfig: '', traceability: true) {
+                       sh "mvn deploy"
+                }
+            }
+        }
+        
+        stage('dockerize the app') {
+            steps {
+              script {
+                 withDockerRegistry(credentialsId: 'docker-cred') {
+                 sh " docker build -t vaibhavkarade/multitierapp:latest ."
+                }
+              }
+            }
+        }
+        
+        stage('trivy image scan') {
+            steps {
+               sh " trivy image --format table -o fs.html vaibhavkarade/multitierapp:latest"
+            }
+        }
+        
+        stage('publish the image') {
+            steps {
+              script {
+                 withDockerRegistry(credentialsId: 'docker-cred') {
+                 sh " docker push vaibhavkarade/multitierapp:latest"
+                }
+              }
+            }
+        }
+        stage('Deploy to K8S') {
+            steps {
+               withKubeConfig(caCertificate: '', clusterName: 'myAKSCluster', contextName: '', credentialsId: 'k8-token', namespace: 'webapps', restrictKubeConfigAccess: false, serverUrl: 'myaksdns-pzh35jj8.hcp.eastus.azmk8s.io') {
+                   sh "kubectl apply -f ds.yml -n webapps"
+                   sleep 60
+               }
+            }
+        }
+        
+        stage('Verify deployment') {
+            steps {
+               withKubeConfig(caCertificate: '', clusterName: 'myAKSCluster', contextName: '', credentialsId: 'k8-token', namespace: 'webapps', restrictKubeConfigAccess: false, serverUrl: 'myaksdns-pzh35jj8.hcp.eastus.azmk8s.io') {
+                   sh "kubectl get svc -n webapps"
+                   sh "kubectl get pods -n webapps"
+                   
+               }
+            }
+        }
+    }
+}

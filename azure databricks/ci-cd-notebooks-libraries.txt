@@ -1,0 +1,29 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+- task: UsePythonVersion@0
+  inputs:
+    versionSpec: '3.x'
+    addToPath: true
+
+- task: DownloadBuildArtifacts@0
+  inputs:
+    artifactName: 'notebooks'
+    downloadPath: '$(System.DefaultWorkingDirectory)/notebooks'
+
+- task: AzureDatabricksNotebook@0
+  inputs:
+    notebookPath: '$(System.DefaultWorkingDirectory)/notebooks/notebook.py'
+    notebookName: 'MyNotebook'
+    serviceConnection: 'YourDatabricksServiceConnectionName'
+    clusterId: 'YourDatabricksClusterId'
+    libraryDependencies: |
+      matplotlib
+      numpy
+      pandas

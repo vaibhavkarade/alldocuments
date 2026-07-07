@@ -1,0 +1,56 @@
+pipeline {
+  tools {
+        maven 'Maven3'
+    }
+    agent any
+        environment {
+        //once you create ACR in Azure cloud, use that here
+        registryName = "myacrrepobunty"
+        //- update your credentials ID after creating credentials for connecting to ACR
+        registryCredential = 'ACR'
+        dockerImage = ''
+        registryUrl = 'myacrrepobunty.azurecr.io'
+        KUBECONFIG = credentials('K8S')
+    }
+    
+    stages {
+        stage('checkout') {
+            steps {
+                checkout([$class: 'GitSCM', branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/vaibhavkarade/springbootapp.git']]])
+            }
+        }
+        
+        stage ('Build Jar') {
+        steps {
+            sh 'mvn clean install'           
+        }
+     }
+     
+    stage ('Build Docker image') {
+        steps {
+                script {
+                    dockerImage = docker.build registryName
+                }
+            }
+        }
+        
+    // Uploading Docker images into ACR
+        stage('Upload Image to ACR') {
+         steps{   
+             script {
+                docker.withRegistry( "http://${registryUrl}", registryCredential ) {
+                dockerImage.push("$BUILD_NUMBER")
+                }
+            }
+          }
+        }
+        
+        stage ('Helm Deploy') {
+          steps {
+            script {
+                sh "helm install --generate-name mychart --namespace helm-deployment --set image.tag=$BUILD_NUMBER"
+                }
+            }
+        }
+    }
+}

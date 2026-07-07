@@ -1,0 +1,200 @@
+To implement Canary Deployments with an Ingress Controller in Kubernetes, you'll need to configure the Ingress resource to control how traffic is routed to different versions of your application. Using an Ingress Controller allows for more granular control over routing, including traffic splitting for Canary releases.
+
+Prerequisites
+Kubernetes Cluster: Make sure you have a running Kubernetes cluster (can be local like Minikube or in the cloud).
+Ingress Controller: Ensure you have an Ingress Controller (e.g., NGINX Ingress Controller) installed in your cluster.
+Application Versions: You need at least two versions of your application (v1 and v2), where v1 is the stable version and v2 is the new version for the Canary release.
+Step-by-Step Guide to Canary Deployment with Ingress Controller
+Step 1: Install Ingress Controller (if not already installed)
+If you haven't installed an Ingress Controller, you can install the NGINX Ingress Controller using Helm or kubectl. Here's how to do it with kubectl:
+
+bash
+Copy code
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
+This will install the NGINX Ingress Controller in the ingress-nginx namespace.
+
+Step 2: Create Application Deployments
+You’ll need two separate deployments: one for the stable version (v1) and another for the canary version (v2).
+
+Stable Version Deployment (v1)
+Create a file called deployment-v1.yaml for the stable version of your app:
+
+yaml
+Copy code
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: myapp
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: myapp
+        version: v1
+    spec:
+      containers:
+      - name: app
+        image: myregistry/app:v1  # Replace with your actual image
+        ports:
+        - containerPort: 80
+Apply the deployment:
+
+bash
+Copy code
+kubectl apply -f deployment-v1.yaml
+Canary Version Deployment (v2)
+Create a file called deployment-v2.yaml for the canary version of your app:
+
+yaml
+Copy code
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-v2
+spec:
+  replicas: 1  # Canary version with fewer replicas
+  selector:
+    matchLabels:
+      app: myapp
+      version: v2
+  template:
+    metadata:
+      labels:
+        app: myapp
+        version: v2
+    spec:
+      containers:
+      - name: app
+        image: myregistry/app:v2  # Replace with your actual image
+        ports:
+        - containerPort: 80
+Apply the deployment:
+
+bash
+Copy code
+kubectl apply -f deployment-v2.yaml
+Step 3: Expose the Application Using a Service
+Create a service to expose both the stable and canary deployments. This service will route traffic to both v1 and v2 deployments based on labels.
+
+Create a file called service.yaml:
+
+yaml
+Copy code
+apiVersion: v1
+kind: Service
+metadata:
+  name: myapp-service
+spec:
+  selector:
+    app: myapp
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 80
+  type: ClusterIP
+Apply the service:
+
+bash
+Copy code
+kubectl apply -f service.yaml
+Step 4: Configure Ingress Resource for Traffic Splitting
+Now, we'll create an Ingress resource that splits traffic between the stable (v1) and canary (v2) versions of the application. We will use the NGINX Ingress Controller's support for routing a percentage of traffic to v2 while most traffic goes to v1.
+
+Create a file called ingress.yaml:
+
+yaml
+Copy code
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: myapp-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/canary: "true"  # Enable canary deployment
+    nginx.ingress.kubernetes.io/canary-weight: "20"  # Set percentage of traffic to canary version
+spec:
+  rules:
+  - host: myapp.local  # Replace with your domain or IP
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: myapp-service
+            port:
+              number: 80
+In the ingress.yaml:
+
+nginx.ingress.kubernetes.io/canary: "true" indicates that this path should be considered as part of the canary release.
+nginx.ingress.kubernetes.io/canary-weight: "20" defines that 20% of the traffic should go to the canary version (app-v2), while 80% will go to the stable version (app-v1).
+Apply the ingress resource:
+
+bash
+Copy code
+kubectl apply -f ingress.yaml
+Step 5: Modify /etc/hosts for Local Testing (Optional)
+If you're running this on your local machine and want to test the Ingress without a public domain, you can modify your /etc/hosts file to point myapp.local to your Kubernetes cluster.
+
+First, get the external IP of your Ingress Controller:
+
+bash
+Copy code
+kubectl get svc -n ingress-nginx
+Look for the EXTERNAL-IP of the NGINX Ingress Controller (usually under the service name ingress-nginx-controller).
+
+Then, update your /etc/hosts:
+
+plaintext
+Copy code
+<external-ip> myapp.local
+Step 6: Verify the Deployment
+You can check if the Canary Deployment is working as expected:
+
+Check the pods:
+
+bash
+Copy code
+kubectl get pods
+You should see pods for both app-v1 and app-v2.
+
+Access the application:
+
+If you modified your /etc/hosts, open your browser and visit http://myapp.local.
+
+You should see that 80% of the requests are served by app-v1 and 20% by app-v2.
+Monitor the traffic distribution:
+
+You can test the canary deployment by accessing the service multiple times and observing how the traffic is split between the two versions of the app. If you want to adjust the traffic distribution, you can change the canary-weight value in the Ingress resource.
+
+Step 7: Scale the Canary Deployment (Optional)
+If you want to increase or decrease the traffic to the canary release, you can scale the app-v2 deployment or modify the canary-weight annotation:
+
+To scale the app-v2 deployment:
+
+bash
+Copy code
+kubectl scale deployment app-v2 --replicas=3
+To adjust the traffic split, modify the canary-weight in the Ingress resource and reapply:
+
+yaml
+Copy code
+nginx.ingress.kubernetes.io/canary-weight: "50"  # Set 50% traffic to canary
+Reapply the Ingress:
+
+bash
+Copy code
+kubectl apply -f ingress.yaml
+Conclusion
+This setup allows you to perform Canary Deployments using an Ingress Controller in Kubernetes. The key points are:
+
+Using annotations (nginx.ingress.kubernetes.io/canary and nginx.ingress.kubernetes.io/canary-weight) for traffic splitting.
+Gradually increasing traffic to the canary version to minimize risk.
+Adjusting traffic dynamically by modifying the Ingress resource.
+This approach works well with the NGINX Ingress Controller, but other Ingress controllers may have different ways of handling Canary Deployments.
+
+

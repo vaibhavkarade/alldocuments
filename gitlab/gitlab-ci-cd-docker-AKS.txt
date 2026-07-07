@@ -1,0 +1,43 @@
+stages:
+  - build
+  - package
+  - deploy
+
+variables:
+  DOCKER_IMAGE_NAME: your-docker-image-name
+  DOCKER_REGISTRY: docker.io
+  DOCKER_USERNAME: your-docker-username
+  DOCKER_PASSWORD: $DOCKER_PASSWORD
+  AZURE_CLIENT_ID: your-azure-client-id
+  AZURE_CLIENT_SECRET: your-azure-client-secret
+  AZURE_TENANT_ID: your-azure-tenant-id
+  AZURE_RESOURCE_GROUP: your-azure-resource-group
+  AZURE_AKS_CLUSTER_NAME: your-aks-cluster-name
+  KUBECONFIG: /root/.kube/config
+
+services:
+  - docker:dind
+
+build:
+  stage: build
+  script:
+    - mvn clean install
+
+package:
+  stage: package
+  script:
+    - docker build -t $DOCKER_IMAGE_NAME .
+    - docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD $DOCKER_REGISTRY
+    - docker push $DOCKER_REGISTRY/$DOCKER_USERNAME/$DOCKER_IMAGE_NAME
+
+deploy:
+  stage: deploy
+  script:
+    - az login --service-principal -u $AZURE_CLIENT_ID -p $AZURE_CLIENT_SECRET --tenant $AZURE_TENANT_ID
+    - az aks get-credentials --resource-group $AZURE_RESOURCE_GROUP --name $AZURE_AKS_CLUSTER_NAME
+    - kubectl apply -f deployment.yaml
+  environment:
+    name: production
+    url: https://your-app-url.com
+  only:
+    - master

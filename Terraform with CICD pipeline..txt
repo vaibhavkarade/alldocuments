@@ -1,0 +1,8 @@
+Terraform with CI/CD pipeline.
+
+1)login to dev.azure.com //Azure Devops portal
+2)create new project in specfic organization
+3)install Terraform as extension in Devops organization
+4)make the repos to keep all terraform files
+5)create CI pipeline, provide source as repo
+6)

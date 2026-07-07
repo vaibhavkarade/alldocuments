@@ -1,0 +1,56 @@
+- task: CopyFiles@2
+  inputs:
+    SourceFolder: 'Terraform-codes'
+    Contents: '**'
+    TargetFolder: '$(Build.ArtifactStagingDirectory)/Terraform'
+- task: PublishBuildArtifacts@1
+  inputs:
+    PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+    ArtifactName: 'drop'
+    publishLocation: 'Container'
+
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+
+trigger:
+- master
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+
+- task: TerraformInstaller@1
+  inputs:
+    terraformVersion: 'latest'
+- task: TerraformTaskV4@4
+  inputs:
+    provider: 'azurerm'
+    command: 'init'
+    backendServiceArm: 'Free Trial(08fcb844-e578-44ed-adfb-519383394cb0)'
+    backendAzureRmResourceGroupName: 'K_group'
+    backendAzureRmStorageAccountName: 'store32124iac'
+    backendAzureRmContainerName: 'terraform'
+    backendAzureRmKey: 'terraform.tfstate'
+- task: TerraformTaskV4@4
+  inputs:
+    provider: 'azurerm'
+    command: 'validate'
+- task: TerraformTaskV4@4
+  inputs:
+    provider: 'azurerm'
+    command: 'plan'
+    commandOptions: '-out tf.plan'
+    workingDirectory: '$(System.DefaultWorkingDirectory)/Terraform-codes'
+    environmentServiceNameAzureRM: 'Free Trial(08fcb844-e578-44ed-adfb-519383394cb0)'
+- task: TerraformTaskV4@4
+  inputs:
+    provider: 'azurerm'
+    command: 'apply'
+    workingDirectory: '$(System.DefaultWorkingDirectory)/Terraform-codes'
+    commandOptions: '-auto-approve'
+    environmentServiceNameAzureRM: 'Free Trial(08fcb844-e578-44ed-adfb-519383394cb0)'
+
+

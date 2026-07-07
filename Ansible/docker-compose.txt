@@ -1,0 +1,16 @@
+---
+- name: Install Docker Compose
+  hosts: all
+  become: yes
+
+  tasks:
+    - name: Download Docker Compose binary
+      get_url:
+        url: "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-Linux-x86_64"
+        dest: /usr/local/bin/docker-compose
+        mode: 'u=rwx,g=rx,o=rx'
+
+    - name: Ensure Docker Compose is executable
+      file:
+        path: /usr/local/bin/docker-compose
+        mode: 'u=rwx,g=rx,o=rx'

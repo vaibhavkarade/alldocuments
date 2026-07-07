@@ -1,0 +1,43 @@
+# Load Azure module and connect to Azure account if not already connected
+Connect-AzAccount
+
+# Initialize an array to store policy details
+$allPolicies = @()
+
+# Get a list of all subscriptions
+$subscriptions = Get-AzSubscription
+
+foreach ($subscription in $subscriptions) {
+    # Set the current subscription context
+    Set-AzContext -Subscription $subscription.Id
+
+    # Get all policies assigned in the current subscription
+    $policyAssignments = Get-AzPolicyAssignment
+
+    foreach ($policyAssignment in $policyAssignments) {
+        # Extract relevant information for each policy
+        $policyDetails = [PSCustomObject]@{
+            SubscriptionId = $subscription.Id
+            SubscriptionName = $subscription.Name
+            PolicyName = $policyAssignment.Name
+            DisplayName = $policyAssignment.DisplayName
+            PolicyDefinitionId = $policyAssignment.PolicyDefinitionId
+            Scope = $policyAssignment.Scope
+            NotScopes = ($policyAssignment.NotScopes -join "; ")  # Join NotScopes as a single string if multiple
+            Parameters = ($policyAssignment.Parameters | ConvertTo-Json -Compress)  # Convert parameters to JSON
+            CreatedBy = $policyAssignment.Identity.PrincipalId
+            CreatedTime = $policyAssignment.CreatedTime
+            ModifiedTime = $policyAssignment.ModifiedTime
+        }
+
+        # Add the policy details to the array
+        $allPolicies += $policyDetails
+    }
+}
+
+# Export the collected policies data to a CSV file
+$csvPath = "AllSubscriptions_Policies.csv"
+$allPolicies | Export-Csv -Path $csvPath -NoTypeInformation -Force
+
+Write-Output "Policy list exported to $csvPath"
+Start-Process -FilePath $csvPath  # Automatically open the CSV file

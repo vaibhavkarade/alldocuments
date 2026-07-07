@@ -1,0 +1,8 @@
+Prereq for ansible to connect with azure
+
+1) install ansible, azure cli from ansible control node
+2)install python, pip, boto3
+pip install boto3
+3) install azure collection latest: ansible-galaxy collection install azure.azcollection:3.5.0
+
+4)install azure sdks: pip3 install --user -r ~/.ansible/collections/ansible_collections/azure/azcollection/requirements.txt

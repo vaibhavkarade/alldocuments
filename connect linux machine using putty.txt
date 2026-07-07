@@ -1,0 +1,2 @@
+1)open putty gen.load the pem file of server and save it as ppk file
+2)open putty app , provide ip address , browse to the ppk file which we saved earlier and open to connect to the machine

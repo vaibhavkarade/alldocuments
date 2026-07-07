@@ -1,0 +1,205 @@
+trigger: none
+pr: none
+
+variables:
+  devSubscriptionId: '8172f712-63ee-44d9-8b59-3fa257b9dcbd'
+  prodSubscriptionId: '8172f712-63ee-44d9-8b59-3fa257b9dcbd'
+  devResourceGroup: 'cicd-auto'
+  devAutomationAccount: 'devautocicd'
+  prodResourceGroup: 'cicd-auto'
+  prodAutomationAccount: 'prodautocicd'
+
+stages:
+
+# ---------------------------------------------------------------------------
+- stage: ExportRunbooks
+  displayName: 'Export all runbooks from Dev'
+  jobs:
+  - job: Export
+    displayName: 'Export Dev runbooks'
+    pool:
+      vmImage: 'windows-latest'
+    steps:
+    - task: AzurePowerShell@5
+      displayName: 'Export runbooks'
+      inputs:
+        azureSubscription: 'svc-conn-dev-automation'
+        ScriptType: InlineScript
+        azurePowerShellVersion: LatestVersion
+        pwsh: true
+        Inline: |
+          Install-Module Az.Automation -Scope CurrentUser -Force -AllowClobber
+
+          Write-Host "Setting context to Dev subscription $(devSubscriptionId)"
+          Set-AzContext -SubscriptionId $(devSubscriptionId) | Out-Null
+
+          $outputFolder = "$(Build.ArtifactStagingDirectory)"
+          New-Item -Path $outputFolder -ItemType Directory -Force | Out-Null
+
+          Write-Host "Retrieving runbooks from Dev Automation account ..."
+          $runbooks = Get-AzAutomationRunbook `
+                        -ResourceGroupName $(devResourceGroup) `
+                        -AutomationAccountName $(devAutomationAccount) `
+                        -ErrorAction Stop
+
+          if (-not $runbooks) {
+            Write-Warning "No runbooks found in Dev automation account."
+          }
+
+          $metadata = @()
+
+          foreach ($runbook in $runbooks) {
+            Write-Host ("Exporting runbook '{0}' (Type = {1})..." -f $runbook.Name, $runbook.RunbookType)
+
+            Export-AzAutomationRunbook `
+              -ResourceGroupName $(devResourceGroup) `
+              -AutomationAccountName $(devAutomationAccount) `
+              -Name $runbook.Name `
+              -Slot Published `
+              -OutputFolder $outputFolder `
+              -Force `
+              | Out-Null
+
+            # Locate the exported file (the command names it <RunbookName>.<ext>)
+            $exportedFile = Get-ChildItem -Path $outputFolder -Filter "$($runbook.Name).*" -File |
+                            Sort-Object LastWriteTime -Descending |
+                            Select-Object -First 1
+
+            if (-not $exportedFile) {
+              throw "Failed to locate exported file for runbook '$($runbook.Name)'."
+            }
+
+            $metadata += [pscustomobject]@{
+              Name = $runbook.Name
+              Type = $runbook.RunbookType
+              File = $exportedFile.Name
+            }
+          }
+
+          $metadataPath = Join-Path $outputFolder 'runbooks.json'
+          $metadata | ConvertTo-Json -Depth 5 | Out-File -FilePath $metadataPath -Encoding UTF8
+
+          Write-Host "Export complete. Metadata written to $metadataPath (Runbooks exported: $($metadata.Count))."
+    - publish: $(Build.ArtifactStagingDirectory)
+      artifact: RunbookPackage
+
+# ---------------------------------------------------------------------------
+- stage: ImportRunbooks
+  displayName: 'Import runbooks into Prod'
+  dependsOn: ExportRunbooks
+  jobs:
+  - job: Import
+    displayName: 'Import to Prod'
+    pool:
+      vmImage: 'windows-latest'
+    steps:
+    - download: current
+      artifact: RunbookPackage
+    - task: AzurePowerShell@5
+      displayName: 'Import & publish runbooks'
+      inputs:
+        azureSubscription: 'svc-conn-dev-automation'
+        ScriptType: InlineScript
+        azurePowerShellVersion: LatestVersion
+        pwsh: true
+        Inline: |
+          Install-Module Az.Automation -Scope CurrentUser -Force -AllowClobber
+
+          Write-Host "Setting context to Prod subscription $(prodSubscriptionId)"
+          Set-AzContext -SubscriptionId $(prodSubscriptionId) | Out-Null
+
+          $artifactFolder = "$(Pipeline.Workspace)/RunbookPackage"
+          $metadataPath = Join-Path $artifactFolder 'runbooks.json'
+
+          if (-not (Test-Path $metadataPath)) {
+            throw "Metadata file 'runbooks.json' not found in artifact. Cannot continue."
+          }
+
+          $metadata = Get-Content -Path $metadataPath -Raw | ConvertFrom-Json
+          if ($metadata -isnot [System.Collections.IEnumerable]) {
+            $metadata = @($metadata)
+          }
+
+          # Map runbook type names (case-insensitive) to the values accepted by Import-AzAutomationRunbook
+          $typeMap = [System.Collections.Generic.Dictionary[string,string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+          $typeMap["PowerShell"]                  = "PowerShell"
+          $typeMap["PowerShellWorkflow"]          = "PowerShellWorkflow"
+          $typeMap["Graph"]                       = "Graph"
+          $typeMap["GraphPowerShell"]             = "GraphicalPowerShell"
+          $typeMap["GraphicalPowerShell"]         = "GraphicalPowerShell"
+          $typeMap["GraphPowerShellWorkflow"]     = "GraphicalPowerShellWorkflow"
+          $typeMap["GraphicalPowerShellWorkflow"] = "GraphicalPowerShellWorkflow"
+          $typeMap["Python2"]                     = "Python2"
+          $typeMap["Python3"]                     = "Python3"
+          $typeMap["Powershell72"]                = "PowerShell72"
+          $typeMap["PowerShell7"]                 = "PowerShell72"
+
+          function Get-CanonicalRunbookType {
+              param([string]$TypeName)
+
+              if ([string]::IsNullOrWhiteSpace($TypeName)) { return $null }
+
+              if ($typeMap.ContainsKey($TypeName)) {
+                  return $typeMap[$TypeName]
+              }
+
+              return $TypeName  # Fallback: return original string
+          }
+
+          foreach ($item in $metadata) {
+            $runbookFile = Join-Path $artifactFolder $item.File
+
+            if (-not (Test-Path $runbookFile)) {
+              throw "Runbook file '$($item.File)' referenced in metadata not found."
+            }
+
+            $importType = Get-CanonicalRunbookType $item.Type
+            if (-not $importType) {
+              Write-Warning ("Runbook '{0}' has null/empty type value. Skipping." -f $item.Name)
+              continue
+            }
+
+            # Check if runbook already exists in Prod
+            $existingRunbook = Get-AzAutomationRunbook `
+                                  -ResourceGroupName $(prodResourceGroup) `
+                                  -AutomationAccountName $(prodAutomationAccount) `
+                                  -Name $item.Name `
+                                  -ErrorAction SilentlyContinue
+
+            if ($existingRunbook) {
+              $existingType = Get-CanonicalRunbookType $existingRunbook.RunbookType
+
+              if ($existingType -and ($existingType -ne $importType)) {
+                Write-Warning ("Runbook '{0}' already exists in Prod with type '{1}'. Removing before import of type '{2}'." `
+                               -f $item.Name, $existingType, $importType)
+
+                Remove-AzAutomationRunbook `
+                  -ResourceGroupName $(prodResourceGroup) `
+                  -AutomationAccountName $(prodAutomationAccount) `
+                  -Name $item.Name `
+                  -Force `
+                  -Confirm:$false `
+                  | Out-Null
+              }
+            }
+
+            Write-Host ("Importing runbook '{0}' (OriginalType = {1}, ImportType = {2}) from '{3}'..." `
+                        -f $item.Name, $item.Type, $importType, $item.File)
+
+            Import-AzAutomationRunbook `
+              -ResourceGroupName $(prodResourceGroup) `
+              -AutomationAccountName $(prodAutomationAccount) `
+              -Name $item.Name `
+              -Path $runbookFile `
+              -Type $importType `
+              -Force `
+              | Out-Null
+
+            Publish-AzAutomationRunbook `
+              -ResourceGroupName $(prodResourceGroup) `
+              -AutomationAccountName $(prodAutomationAccount) `
+              -Name $item.Name `
+              | Out-Null
+          }
+
+          Write-Host "Import and publish of all runbooks completed successfully."

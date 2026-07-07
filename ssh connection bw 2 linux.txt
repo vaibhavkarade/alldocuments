@@ -1,0 +1,4 @@
+1)in first server, generate ssh public and private keys using cmd:ssh key-gen
+2)go to path ./ssh and copy the id_rsa.pub key 
+3)In other server go to ./ssh and open authorised keys and paste the public key of first server to establish pwdless connection bw 2 servers
+4)ssh username@IP to connect

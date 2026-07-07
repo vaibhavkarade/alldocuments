@@ -1,0 +1,55 @@
+# ---------------- CONFIG ----------------
+$ErrorActionPreference = "Stop"
+$ProgressPreference    = "SilentlyContinue"
+
+$subscriptionId = "8172f712-63ee-44d9-8b59-3fa257b9dcbd"   # Hardcoded Subscription ID
+$orgName        = "DevOpsStuffs"                          # Hardcoded Org Name
+
+# ---------------- LOGIN -----------------
+Write-Output "🔐 Logging in with Managed Identity..."
+Connect-AzAccount -Identity | Out-Null
+Set-AzContext -SubscriptionId $subscriptionId | Out-Null
+
+# ---------------- DATES -----------------
+$startDate = (Get-Date).AddYears(-1)   # last 1 year
+$endDate   = Get-Date
+
+# ---------------- COST DATA -------------
+Write-Output "📊 Fetching Azure DevOps cost breakdown for Org '$orgName' from $startDate to $endDate..."
+
+$costData = Get-AzConsumptionUsageDetail `
+    -StartDate $startDate `
+    -EndDate $endDate
+
+# Filter only DevOps-related entries
+$devOpsCosts = $costData | Where-Object {
+    $_.InstanceName -like "*$orgName*"
+}
+
+if (-not $devOpsCosts) {
+    Write-Output "ℹ️ No Azure DevOps-related costs found in last 1 year."
+}
+else {
+    # Group by Service (Artifacts, Pipelines, TestPlans, etc.)
+    $groupedCosts = $devOpsCosts | Group-Object -Property MeterSubCategory
+
+    foreach ($group in $groupedCosts) {
+        Write-Output "`n🔹 Service: $($group.Name)"
+        $group.Group | Select-Object `
+            @{Name="Date";Expression={$_.UsageStart}},
+            @{Name="Service";Expression={$_.MeterSubCategory}},
+            @{Name="Resource";Expression={$_.InstanceName}},
+            @{Name="Consumed Units";Expression={$_.Quantity}},
+            @{Name="Cost ($)";Expression={[math]::Round($_.PretaxCost,2)}} |
+            Format-Table -AutoSize
+    }
+
+    # Show total per service
+    Write-Output "`n💰 Total Cost by Service (last 1 year):"
+    $devOpsCosts | Group-Object -Property MeterSubCategory | ForEach-Object {
+        [PSCustomObject]@{
+            Service    = $_.Name
+            TotalCost  = ($_.Group | Measure-Object -Property PretaxCost -Sum).Sum
+        }
+    } | Format-Table -AutoSize
+}

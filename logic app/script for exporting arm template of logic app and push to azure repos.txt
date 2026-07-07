@@ -1,0 +1,34 @@
+#!/bin/bash
+
+# Set variables
+resourceGroupName="YourResourceGroupName"  # Replace with your Resource Group name
+logicAppName="YourLogicAppName"  # Replace with your Logic App name
+outputFolder="/path/to/export/template"  # Replace with the folder to export the ARM template
+localRepo="/path/to/your/local/repo"  # Replace with your local repo path
+repoUrl="https://your_azure_repo_url"  # Replace with your Azure Repo URL
+branch="master"  # Branch to push changes to
+
+# Export the Logic App's ARM template
+az logicapp export --resource-group $resourceGroupName --name $logicAppName --output-folder $outputFolder
+
+# Clone the Azure Repo if the local repo doesn't exist
+if [ ! -d "$localRepo" ]; then
+    git clone $repoUrl $localRepo
+fi
+
+# Navigate to your local Git repo
+cd $localRepo
+
+# Copy the exported ARM template and parameters to the local repo
+cp $outputFolder/template.json .
+cp $outputFolder/parameters.json .
+
+# Check for changes in the repo
+if [ -n "$(git status --porcelain)" ]; then
+    git add template.json parameters.json
+    git commit -m "Updated ARM template for Logic App: $logicAppName"
+    git push origin $branch
+    echo "Changes pushed to Azure Repo."
+else
+    echo "No changes to commit."
+fi

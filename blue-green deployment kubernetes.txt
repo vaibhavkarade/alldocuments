@@ -1,0 +1,174 @@
+A Blue-Green Deployment is a deployment strategy where two environments, "Blue" and "Green," run concurrently. The "Blue" environment is the current production version, while the "Green" environment is the new version that is tested before switching traffic over. This ensures minimal downtime and allows quick rollbacks if issues occur.
+
+Step-by-step Setup for Blue-Green Deployment in AKS
+Create a Namespace (optional): To keep resources organized, create a new namespace.
+
+bash
+Copy code
+kubectl create namespace blue-green-demo
+Deploy the Blue (Current Production) Version: Create a deployment for the "Blue" version.
+
+yaml
+Copy code
+# deployment-blue.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp-blue
+  namespace: blue-green-demo
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: webapp
+      version: blue
+  template:
+    metadata:
+      labels:
+        app: webapp
+        version: blue
+    spec:
+      containers:
+      - name: webapp
+        image: nginx:1.19
+        ports:
+        - containerPort: 80
+Apply the deployment:
+
+bash
+Copy code
+kubectl apply -f deployment-blue.yaml
+Deploy the Green (New) Version: Create a deployment for the "Green" version, which is the new version.
+
+yaml
+Copy code
+# deployment-green.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webapp-green
+  namespace: blue-green-demo
+spec:
+  replicas: 0  # Start with zero replicas, only scale up when ready
+  selector:
+    matchLabels:
+      app: webapp
+      version: green
+  template:
+    metadata:
+      labels:
+        app: webapp
+        version: green
+    spec:
+      containers:
+      - name: webapp
+        image: nginx:1.21  # New version
+        ports:
+        - containerPort: 80
+Apply the deployment:
+
+bash
+Copy code
+kubectl apply -f deployment-green.yaml
+Create a Service for Load Balancing: Create a service to route traffic to the active deployment.
+
+yaml
+Copy code
+# service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp-service
+  namespace: blue-green-demo
+spec:
+  selector:
+    app: webapp
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+  type: LoadBalancer
+Apply the service:
+
+bash
+Copy code
+kubectl apply -f service.yaml
+Verify the Current Version (Blue) Is Running: Ensure that the Blue version is running and exposed by checking the pods and service.
+
+bash
+Copy code
+kubectl get pods -n blue-green-demo
+kubectl get svc -n blue-green-demo
+Test the Green Environment: Scale up the Green version and test it while keeping the Blue version running.
+
+bash
+Copy code
+kubectl scale deployment webapp-green --replicas=3 -n blue-green-demo
+Visit the external IP of the service and verify that the new Green version is running without any issues.
+
+Switch Traffic to the Green Environment: Once the Green version is verified and ready for production, change the selector in the service to point to the Green deployment.
+
+yaml
+Copy code
+# service-blue-green.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp-service
+  namespace: blue-green-demo
+spec:
+  selector:
+    app: webapp
+    version: green  # Switch to Green
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+  type: LoadBalancer
+Apply the updated service:
+
+bash
+Copy code
+kubectl apply -f service-blue-green.yaml
+Cleanup (Optional): If everything is working fine with the Green version, you can delete the Blue deployment or keep it as a backup for rollback.
+
+bash
+Copy code
+kubectl delete deployment webapp-blue -n blue-green-demo
+Verifying the Setup:
+Check the Pods: Ensure that the Green version is running and serving traffic:
+bash
+Copy code
+kubectl get pods -n blue-green-demo
+Monitor Logs: Check the logs of the pods to verify the application is working as expected.
+bash
+Copy code
+kubectl logs -l app=webapp -n blue-green-demo
+Access the Application: Visit the external IP provided by the LoadBalancer service to confirm that the traffic is routed to the Green version.
+Rollback Procedure:
+If issues are detected after switching traffic to the Green version, you can switch back to the Blue version by updating the service selector.
+
+yaml
+Copy code
+# rollback-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: webapp-service
+  namespace: blue-green-demo
+spec:
+  selector:
+    app: webapp
+    version: blue  # Roll back to Blue
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+  type: LoadBalancer
+Apply the rollback service:
+
+bash
+Copy code
+kubectl apply -f rollback-service.yaml
+Conclusion:
+This Blue-Green Deployment strategy in AKS ensures that you can release new versions with minimal downtime and provides a simple rollback option in case of issues. The traffic is only switched to the new version once it's been thoroughly tested and verified.

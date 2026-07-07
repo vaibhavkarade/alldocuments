@@ -1,0 +1,20 @@
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update
+kubectl create namespace monitoring
+helm install prometheus prometheus-community/kube-prometheus-stack \
+    --namespace monitoring \
+    --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false
+helm install grafana grafana/grafana \
+    --namespace monitoring \
+    --set persistence.enabled=true \
+    --set adminPassword='Admin@123' \
+    --set service.type=LoadBalancer
+
+
+
+
+kubectl port-forward svc/grafana 3000:3000 -n monitoring --address 0.0.0.0
+
+Import Dashboard ID 3119 (Kubernetes Cluster Monitoring).
+Import Dashboard ID 6417 (Kubernetes Services Monitoring).

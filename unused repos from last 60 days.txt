@@ -1,0 +1,451 @@
+# Databricks notebook source
+# MAGIC %md
+# MAGIC ## 🔍 List Repositories Inactive for 60+ Days (ALL BRANCHES CHECK)
+
+# COMMAND ----------
+
+%pip install requests
+
+# COMMAND ----------
+
+import requests
+from datetime import datetime, timedelta
+import pandas as pd
+from base64 import b64encode
+from pyspark.sql.functions import lit, current_timestamp
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### ⚙️ Configuration
+
+# COMMAND ----------
+
+# 🔴 REPLACE THESE VALUES WITH YOUR ACTUAL CREDENTIALS
+organization = "RB-Group"
+project = "IT_and_D_Project"
+pat = "02KOCADUt9aOLUkq30Xc3D6zdvjVCyMCBLzuA6PirFdcSmei86irJQQJ99CFACAAAAA3JS2aAAASAZDO2XOR"
+
+days_inactive = 60
+check_all_branches = True  # 🔴 NEW: Set to False for default branch only
+
+print(f"✅ Configuration:")
+print(f"   Organization: {organization}")
+print(f"   Project: {project}")
+print(f"   Branch Check: {'ALL BRANCHES ✅' if check_all_branches else 'DEFAULT ONLY ⚠️'}")
+print(f"   Looking for repos inactive since: {(datetime.now() - timedelta(days=days_inactive)).strftime('%Y-%m-%d')}")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 🔍 Find Inactive Repositories (Checking ALL Branches)
+
+# COMMAND ----------
+
+# Setup API authentication
+authorization = str(b64encode(bytes(':' + pat, 'ascii')), 'ascii')
+headers = {
+    'Authorization': f'Basic {authorization}',
+    'Content-Type': 'application/json'
+}
+
+threshold_date = datetime.now() - timedelta(days=days_inactive)
+
+# Get all repositories
+repos_url = f"https://dev.azure.com/{organization}/{project}/_apis/git/repositories?api-version=7.0"
+
+try:
+    response = requests.get(repos_url, headers=headers, timeout=30)
+    response.raise_for_status()
+    repositories = response.json()['value']
+    print(f"📦 Found {len(repositories)} total repositories\n")
+except Exception as e:
+    print(f"❌ Error: {e}")
+    dbutils.notebook.exit("Failed to fetch repositories")
+
+# Find inactive ones
+inactive_repos = []
+
+print(f"🔍 Scanning repositories {'across ALL branches' if check_all_branches else 'on default branch only'}...\n")
+
+for idx, repo in enumerate(repositories, 1):
+    repo_name = repo['name']
+    repo_id = repo['id']
+    
+    if idx % 25 == 0:
+        print(f"   Processed {idx}/{len(repositories)} repositories...")
+    
+    try:
+        most_recent_commit = None
+        most_recent_date = None
+        most_active_branch = None
+        all_recent_committers = set()
+        all_recent_emails = set()
+        active_branches_list = []
+        
+        if check_all_branches:
+            # 🔴 NEW: Get ALL branches first
+            branches_url = f"https://dev.azure.com/{organization}/{project}/_apis/git/repositories/{repo_id}/refs?filter=heads/&api-version=7.0"
+            
+            try:
+                branches_response = requests.get(branches_url, headers=headers, timeout=30)
+                branches_response.raise_for_status()
+                branches_data = branches_response.json()
+                
+                if branches_data.get('count', 0) == 0:
+                    # No branches, treat as empty
+                    inactive_repos.append({
+                        'Repository_Name': repo_name,
+                        'Last_Commit_Date': 'Never (Empty)',
+                        'Days_Inactive': 'N/A',
+                        'Most_Active_Branch': 'N/A',
+                        'Active_Branches_Count': 0,
+                        'Last_Committer_Name': 'N/A',
+                        'Last_Committer_Email': 'N/A',
+                        'All_Recent_Committers': 'N/A',
+                        'Commit_Message': 'N/A',
+                        'Web_URL': repo['webUrl']
+                    })
+                    continue
+                
+                # 🔴 NEW: Check each branch for activity
+                for branch_ref in branches_data.get('value', []):
+                    branch_name = branch_ref['name'].replace('refs/heads/', '')
+                    
+                    # Get commits for this specific branch
+                    commits_url = f"https://dev.azure.com/{organization}/{project}/_apis/git/repositories/{repo_id}/commits?searchCriteria.itemVersion.version={branch_name}&$top=5&api-version=7.0"
+                    
+                    try:
+                        commits_response = requests.get(commits_url, headers=headers, timeout=30)
+                        commits_response.raise_for_status()
+                        commits_data = commits_response.json()
+                        
+                        if commits_data.get('count', 0) > 0:
+                            # Get latest commit on this branch
+                            latest_commit = commits_data['value'][0]
+                            commit_date_str = latest_commit['committer']['date']
+                            
+                            # Parse date
+                            if 'Z' in commit_date_str:
+                                commit_date = datetime.strptime(commit_date_str, '%Y-%m-%dT%H:%M:%SZ')
+                            else:
+                                commit_date = datetime.fromisoformat(commit_date_str.replace('Z', '+00:00'))
+                            
+                            # Track if this branch is active
+                            if commit_date >= threshold_date:
+                                active_branches_list.append(f"{branch_name} ({(datetime.now() - commit_date).days}d)")
+                            
+                            # Update most recent commit across all branches
+                            if most_recent_date is None or commit_date > most_recent_date:
+                                most_recent_date = commit_date
+                                most_recent_commit = latest_commit
+                                most_active_branch = branch_name
+                            
+                            # Collect committers from recent commits
+                            for commit in commits_data['value'][:5]:
+                                all_recent_committers.add(commit['committer']['name'])
+                                all_recent_emails.add(commit['committer']['email'])
+                    
+                    except Exception as branch_error:
+                        continue
+            
+            except Exception as branches_error:
+                print(f"⚠️ Could not fetch branches for {repo_name}: {branches_error}")
+                continue
+        
+        else:
+            # Original behavior: check only default branch
+            commits_url = f"https://dev.azure.com/{organization}/{project}/_apis/git/repositories/{repo_id}/commits?$top=5&api-version=7.0"
+            
+            try:
+                commits_response = requests.get(commits_url, headers=headers, timeout=30)
+                commits_response.raise_for_status()
+                commits_data = commits_response.json()
+                
+                if commits_data.get('count', 0) > 0:
+                    most_recent_commit = commits_data['value'][0]
+                    commit_date_str = most_recent_commit['committer']['date']
+                    
+                    if 'Z' in commit_date_str:
+                        most_recent_date = datetime.strptime(commit_date_str, '%Y-%m-%dT%H:%M:%SZ')
+                    else:
+                        most_recent_date = datetime.fromisoformat(commit_date_str.replace('Z', '+00:00'))
+                    
+                    most_active_branch = repo.get('defaultBranch', 'N/A').replace('refs/heads/', '')
+                    
+                    for commit in commits_data['value']:
+                        all_recent_committers.add(commit['committer']['name'])
+                        all_recent_emails.add(commit['committer']['email'])
+            
+            except Exception as commits_error:
+                continue
+        
+        # 🔴 UPDATED: Only add to inactive list if NO activity across ALL branches
+        if most_recent_date is None:
+            # Completely empty repo
+            inactive_repos.append({
+                'Repository_Name': repo_name,
+                'Last_Commit_Date': 'Never (Empty)',
+                'Days_Inactive': 'N/A',
+                'Most_Active_Branch': 'N/A',
+                'Active_Branches_Count': 0,
+                'Last_Committer_Name': 'N/A',
+                'Last_Committer_Email': 'N/A',
+                'All_Recent_Committers': 'N/A',
+                'Commit_Message': 'N/A',
+                'Web_URL': repo['webUrl']
+            })
+        elif most_recent_date < threshold_date:
+            # Inactive across all branches
+            days_diff = (datetime.now() - most_recent_date).days
+            
+            inactive_repos.append({
+                'Repository_Name': repo_name,
+                'Last_Commit_Date': most_recent_date.strftime('%Y-%m-%d'),
+                'Days_Inactive': days_diff,
+                'Most_Active_Branch': most_active_branch,
+                'Active_Branches_Count': len(active_branches_list),
+                'Last_Committer_Name': most_recent_commit['committer']['name'],
+                'Last_Committer_Email': most_recent_commit['committer']['email'],
+                'All_Recent_Committers': ', '.join(list(all_recent_committers)[:5]),
+                'Commit_Message': most_recent_commit['comment'].split('\n')[0][:100],
+                'Web_URL': repo['webUrl']
+            })
+    
+    except Exception as e:
+        print(f"⚠️ Error checking {repo_name}: {e}")
+
+print(f"✅ Scan complete!\n")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 📋 Results Summary
+
+# COMMAND ----------
+
+print(f"{'='*100}")
+print(f"📊 SCAN RESULTS")
+print(f"{'='*100}\n")
+print(f"Project: {project}")
+print(f"Organization: {organization}")
+print(f"Branch Coverage: {'ALL BRANCHES ✅' if check_all_branches else 'DEFAULT ONLY ⚠️'}")
+print(f"Scan Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+print(f"Inactivity Threshold: {days_inactive} days (since {threshold_date.strftime('%Y-%m-%d')})\n")
+print(f"Total Repositories: {len(repositories)}")
+print(f"Active Repositories: {len(repositories) - len(inactive_repos)}")
+print(f"Inactive Repositories: {len(inactive_repos)}")
+print(f"Inactivity Rate: {(len(inactive_repos) / len(repositories) * 100):.1f}%")
+print(f"{'='*100}\n")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 📊 Display Inactive Repositories Table
+
+# COMMAND ----------
+
+if len(inactive_repos) > 0:
+    df = pd.DataFrame(inactive_repos)
+    
+    print(f"🔴 SHOWING {len(inactive_repos)} INACTIVE REPOSITORIES:\n")
+    print(f"{'(Checked ALL branches)' if check_all_branches else '(Checked default branch only)'}\n")
+    
+    display(df)
+    
+    print(f"\n✅ Table displayed above with {len(df)} rows")
+    
+else:
+    print(f"✅ Great! No inactive repositories found.")
+    df = pd.DataFrame(columns=['Repository_Name', 'Last_Commit_Date', 'Days_Inactive', 'Most_Active_Branch',
+                                'Active_Branches_Count', 'Last_Committer_Name', 'Last_Committer_Email', 
+                                'All_Recent_Committers', 'Commit_Message', 'Web_URL'])
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 📝 Detailed List
+
+# COMMAND ----------
+
+if len(inactive_repos) > 0:
+    print(f"\n{'='*120}")
+    print(f"📝 DETAILED LIST OF INACTIVE REPOSITORIES (First 50)")
+    print(f"{'='*120}\n")
+    
+    display_count = min(50, len(inactive_repos))
+    
+    for idx, repo in enumerate(inactive_repos[:display_count], 1):
+        print(f"{idx}. {repo['Repository_Name']}")
+        print(f"   📅 Last Commit: {repo['Last_Commit_Date']} ({repo['Days_Inactive']} days ago)")
+        print(f"   🌿 Branch: {repo.get('Most_Active_Branch', 'N/A')}")
+        print(f"   👤 Last Committer: {repo['Last_Committer_Name']} ({repo['Last_Committer_Email']})")
+        if repo.get('All_Recent_Committers') and repo['All_Recent_Committers'] != 'N/A':
+            print(f"   👥 Recent Committers: {repo['All_Recent_Committers']}")
+        print(f"   💬 Commit Message: {repo['Commit_Message']}")
+        print(f"   🔗 URL: {repo['Web_URL']}\n")
+    
+    if len(inactive_repos) > 50:
+        print(f"... and {len(inactive_repos) - 50} more repositories")
+    
+    print(f"{'='*120}\n")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 👥 Top Committers in Inactive Repos
+
+# COMMAND ----------
+
+if len(inactive_repos) > 0:
+    valid_committers = [r['Last_Committer_Name'] for r in inactive_repos if r['Last_Committer_Name'] != 'N/A']
+    
+    if valid_committers:
+        from collections import Counter
+        
+        committer_counts = Counter(valid_committers)
+        
+        print(f"\n{'='*100}")
+        print(f"👥 TOP COMMITTERS IN INACTIVE REPOSITORIES")
+        print(f"{'='*100}\n")
+        
+        print(f"{'Rank':<6} {'Committer Name':<40} {'# of Repos':<15}")
+        print(f"{'-'*6} {'-'*40} {'-'*15}")
+        
+        for rank, (committer, count) in enumerate(committer_counts.most_common(20), 1):
+            print(f"{rank:<6} {committer:<40} {count:<15}")
+        
+        print(f"\n{'='*100}\n")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 💾 Save to Delta Table
+
+# COMMAND ----------
+
+if len(inactive_repos) > 0:
+    table_name = f"inactive_repos_{project.replace('-', '_').replace(' ', '_').lower()}"
+    
+    print(f"💾 Saving to Delta table...")
+    
+    df_spark = spark.createDataFrame(df)
+    
+    df_spark = df_spark \
+        .withColumn("scan_date", lit(datetime.now().strftime('%Y-%m-%d'))) \
+        .withColumn("scan_timestamp", current_timestamp()) \
+        .withColumn("project_name", lit(project)) \
+        .withColumn("days_threshold", lit(days_inactive)) \
+        .withColumn("checked_all_branches", lit(check_all_branches))
+    
+    df_spark.write.format("delta").mode("overwrite").option("overwriteSchema", "true").saveAsTable(table_name)
+    
+    record_count = df_spark.count()
+    
+    print(f"✅ Saved to Delta table: {table_name}")
+    print(f"   Records saved: {record_count}")
+    print(f"   Branch coverage: {'ALL BRANCHES ✅' if check_all_branches else 'DEFAULT ONLY ⚠️'}\n")
+else:
+    print("ℹ️ No inactive repositories to save\n")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 📁 Export to CSV
+
+# COMMAND ----------
+
+if len(inactive_repos) > 0:
+    try:
+        csv_filename = f"inactive_repos_{'ALL_BRANCHES_' if check_all_branches else ''}{project}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        csv_path = f"/dbfs/FileStore/{csv_filename}"
+        
+        df.to_csv(csv_path, index=False)
+        
+        workspace_url = dbutils.notebook.entry_point.getDbutils().notebook().getContext().browserHostName().get()
+        download_url = f"https://{workspace_url}/files/{csv_filename}"
+        
+        print(f"✅ CSV exported successfully!")
+        print(f"   Filename: {csv_filename}")
+        print(f"   Download URL: {download_url}")
+        print(f"   Records: {len(df)}")
+        print(f"   Branch coverage: {'ALL BRANCHES ✅' if check_all_branches else 'DEFAULT ONLY ⚠️'}\n")
+        
+    except Exception as e:
+        print(f"⚠️ CSV export failed: {e}\n")
+else:
+    print("ℹ️ No data to export\n")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### 📊 Statistics Breakdown
+
+# COMMAND ----------
+
+if len(inactive_repos) > 0:
+    print(f"{'='*100}")
+    print(f"📊 STATISTICS BREAKDOWN")
+    print(f"{'='*100}\n")
+    
+    empty_count = len([r for r in inactive_repos if r['Last_Commit_Date'] == 'Never (Empty)'])
+    truly_inactive = len(inactive_repos) - empty_count
+    
+    print(f"Breakdown by Status:")
+    print(f"   • Empty Repositories (never had commits): {empty_count}")
+    print(f"   • Inactive Repositories (no recent commits): {truly_inactive}")
+    print(f"   • Total Inactive: {len(inactive_repos)}\n")
+    
+    if truly_inactive > 0:
+        days_list = [int(r['Days_Inactive']) for r in inactive_repos if r['Days_Inactive'] != 'N/A']
+        
+        if days_list:
+            print(f"Inactivity Duration:")
+            print(f"   • Minimum: {min(days_list)} days")
+            print(f"   • Maximum: {max(days_list)} days")
+            print(f"   • Average: {sum(days_list)//len(days_list)} days")
+            
+            age_60_90 = len([d for d in days_list if 60 <= d < 90])
+            age_90_180 = len([d for d in days_list if 90 <= d < 180])
+            age_180_365 = len([d for d in days_list if 180 <= d < 365])
+            age_365_plus = len([d for d in days_list if d >= 365])
+            
+            print(f"\n   Age Distribution:")
+            print(f"     60-90 days:    {age_60_90} repos")
+            print(f"     90-180 days:   {age_90_180} repos")
+            print(f"     180-365 days:  {age_180_365} repos")
+            print(f"     365+ days:     {age_365_plus} repos (1+ year old!)")
+    
+    print(f"\n{'='*100}\n")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### ✅ Final Summary
+
+# COMMAND ----------
+
+print(f"\n{'='*100}")
+print(f"✅ SCAN COMPLETED SUCCESSFULLY")
+print(f"{'='*100}\n")
+
+print(f"📊 Summary:")
+print(f"   • Branch Coverage: {'ALL BRANCHES ✅' if check_all_branches else 'DEFAULT BRANCH ONLY ⚠️'}")
+print(f"   • Scanned: {len(repositories)} repositories")
+print(f"   • Found: {len(inactive_repos)} inactive repositories")
+print(f"   • Inactivity Rate: {(len(inactive_repos) / len(repositories) * 100):.1f}%\n")
+
+if len(inactive_repos) > 0:
+    print(f"💾 Data Saved To:")
+    print(f"   • Delta Table: {table_name}")
+    print(f"   • CSV File: /FileStore/{csv_filename if 'csv_filename' in locals() else 'inactive_repos_...csv'}\n")
+    
+    print(f"📌 Next Steps:")
+    print(f"   1. Review the inactive repositories list above")
+    print(f"   2. Contact last committers about repo status")
+    print(f"   3. Consider archiving or deleting unused repos\n")
+else:
+    print(f"✅ All repositories are active!\n")
+
+print(f"{'='*100}\n")
+print(f"🎉 Scan complete! {'ALL branches checked ✅' if check_all_branches else 'Only default branch checked ⚠️'}")

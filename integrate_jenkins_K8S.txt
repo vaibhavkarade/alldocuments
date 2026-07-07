@@ -1,0 +1,39 @@
+pipeline {
+    agent any
+
+    stages {
+        stage('git checkout') {
+            steps {
+               checkout scmGit(branches: [[name: '*/master']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/vaibhavkarade/node-app.git']])
+            }
+        }
+         stage('build image and tag') {
+            steps {
+               script {
+                   sh 'docker build -t vaibhavkarade/app-jenkins-k8s .'
+               }
+            }
+        }
+          stage('image push') {
+            steps {
+               script {
+                   withCredentials([string(credentialsId: 'dockerhub', variable: 'dockerhub')]) {
+                sh 'docker login -u vaibhavkarade -p ${dockerhub} '
+}
+                sh ' docker push vaibhavkarade/app-jenkins-k8s'
+               }
+            }
+        }
+        stage('kubernetes deploy') {
+            steps {
+               
+            script {
+                 kubernetesDeploy (configs:"deploymentservice.yml",kubeconfigId:"KUBERNETES")
+               }
+
+              
+            }
+        } 
+        
+    }
+}

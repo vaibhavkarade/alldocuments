@@ -1,0 +1,32 @@
+1) generate ssh public key from ansible control machine using cmd:
+# Generate SSH keys
+ssh-keygen -t rsa -b 2048
+
+
+2)
+# Copy the public key to the MongoDB VM
+ssh-copy-id azureuser@<mongodb_vm_ip>
+
+
+
+3)ssh azureuser@<mongodb_vm_ip>
+
+
+note: mongodb vm is ansible target nodes
+
+IF above steps dont workthen
+
+1)copy the contents of generated public key in ansible control machine :
+cat ~/.ssh/id_rsa.pub
+
+
+2)login into ansible target machine using basic pwd and go to path ~/.ssh/authorized_keys. paste the copied public key in authorized keys of target machine
+
+3) provide permission in target machine :
+chmod 700 ~/.ssh
+chmod 600 ~/.ssh/authorized_keys
+
+
+4) test the connection using command:
+ssh bunty@172.173.164.150
+ssh username@targetvm ip

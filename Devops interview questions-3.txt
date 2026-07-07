@@ -1,0 +1,28 @@
+🚀 Azure & Cloud Infrastructure
+✅ How would you design an auto-healing Azure infrastructure for web apps under variable traffic?
+✅ How do you set up Private Endpoints and Service Endpoints in Azure to secure traffic between services?
+✅ What’s your approach to implementing cross-region failover in Azure without manual intervention?
+✅ How do you control idle resource costs in multi-subscription environments?
+
+🚀 Kubernetes & Containers
+✅ How do you implement pod disruption budgets (PDB) for critical workloads?
+✅ What’s your strategy to migrate workloads from AKS to EKS without downtime?
+✅ How would you troubleshoot a scenario where pods are in CrashLoopBackOff due to ConfigMap changes?
+✅ Explain how you can enforce network isolation policies between namespaces in AKS.
+
+🚀 CI/CD & Automation
+✅ How do you create dynamic environments (preview environments) on every PR using pipelines?
+✅ What’s your method to optimize pipeline runtime while maintaining code quality and security scans?
+✅ How do you ensure compliance checks (like CIS benchmarks) are part of CI/CD gates?
+✅ Explain how you handle multi-cloud deployments using GitHub Actions or Jenkins pipelines.
+
+🚀 Security, Governance & Compliance
+✅ How do you manage key rotation across Azure Key Vault and AWS Secrets Manager?
+✅ What’s your approach for scanning IaC templates for misconfigurations before deployment?
+✅ How would you detect and stop a container escape attempt in a production environment?
+✅ Explain how you would integrate policy enforcement using OPA or Kyverno across clusters.
+
+🚀 Monitoring & Resilience
+✅ How do you set up synthetic monitoring to test critical application endpoints proactively?
+✅ Explain how you’d implement distributed tracing for identifying latency in microservices.
+✅ How would you monitor pipeline success rate and MTTR (Mean Time to Recovery) trends?

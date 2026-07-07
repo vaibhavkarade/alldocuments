@@ -1,0 +1,72 @@
+# =============================
+# CONFIG
+# =============================
+$Subscription       = "Group-TRINITY-Dev-northeurope"
+ 
+$EventHubRG         = "rg-trinity-dev-sentry-northeurope"
+$EventHubNamespace  = "ehubns-trinity-dev-sentry-northeurope"
+$EventHubName       = "eh-storage-sentry-dev"
+$EventHubAuthRule   = "RootManageSharedAccessKey"
+ 
+$DiagPrefix         = "sentry-blob"
+# =============================
+ 
+Write-Host "Switching subscription to $Subscription ..." -ForegroundColor Cyan
+az account set --subscription $Subscription | Out-Null
+ 
+$SubscriptionId = az account show --query id -o tsv
+ 
+# Namespace-level Event Hub auth rule ID (MANDATORY)
+$EHRuleId = "/subscriptions/$SubscriptionId/resourceGroups/$EventHubRG/providers/Microsoft.EventHub/namespaces/$EventHubNamespace/authorizationRules/$EventHubAuthRule"
+ 
+Write-Host "Using Event Hub Rule ID:" -ForegroundColor Cyan
+Write-Host $EHRuleId -ForegroundColor Yellow
+Write-Host ""
+ 
+# =============================
+# Get ALL Storage Accounts
+# =============================
+Write-Host "Fetching all storage accounts..." -ForegroundColor Cyan
+ 
+$storageAccounts = az storage account list `
+  --subscription $Subscription `
+  --query "[].{name:name, rg:resourceGroup, id:id}" `
+  -o json | ConvertFrom-Json
+ 
+if (-not $storageAccounts) {
+    Write-Host "No Storage Accounts found." -ForegroundColor Red
+    exit
+}
+ 
+# =============================
+# Configure BLOB diagnostics
+# =============================
+foreach ($sa in $storageAccounts) {
+ 
+    # 🚫 Skip Databricks-managed storage accounts
+    if ($sa.rg -like "databricks-rg-*") {
+        Write-Host "Skipping Databricks-managed storage: $($sa.name)" -ForegroundColor DarkYellow
+        continue
+    }
+ 
+    $BlobResourceId = "$($sa.id)/blobServices/default"
+    $DiagName       = "$DiagPrefix-$($sa.name)"
+ 
+    Write-Host "Configuring BLOB diagnostics for: $($sa.name)" -ForegroundColor Green
+ 
+    az monitor diagnostic-settings create `
+        --name $DiagName `
+        --resource $BlobResourceId `
+        --event-hub $EventHubName `
+        --event-hub-rule $EHRuleId `
+        --logs '[
+          {"category":"StorageRead","enabled":true},
+          {"category":"StorageWrite","enabled":true},
+          {"category":"StorageDelete","enabled":true}
+        ]' `
+        --metrics '[{"category":"Transaction","enabled":true}]' `
+        --only-show-errors | Out-Null
+}
+ 
+Write-Host ""
+Write-Host "DONE. Blob-level diagnostics enabled for ALL customer-managed storage accounts." -ForegroundColor Cyan

@@ -1,0 +1,96 @@
+#!/bin/bash
+
+# Variables
+PG_DB="mydatabase"
+PG_USER="postgres"
+BACKUP_FILE="/tmp/pg_backup_$(date +'%Y%m%d%H%M%S').sql"
+STORAGE_ACCOUNT="mypgstorageacct"
+CONTAINER="pgbackups"
+ACCOUNT_KEY="your_storage_account_key"
+
+echo "=== Starting PostgreSQL Backup ==="
+
+# Step 1: Backup PostgreSQL Database
+sudo -u $PG_USER pg_dump $PG_DB > $BACKUP_FILE
+
+if [ $? -eq 0 ]; then
+    echo "✔ Backup successful: $BACKUP_FILE"
+else
+    echo "❌ Backup failed!"
+    exit 1
+fi
+
+# Step 2: Upload Backup to Azure Storage
+az storage blob upload \
+  --account-name $STORAGE_ACCOUNT \
+  --container-name $CONTAINER \
+  --name $(basename $BACKUP_FILE) \
+  --file $BACKUP_FILE \
+  --account-key $ACCOUNT_KEY
+
+if [ $? -eq 0 ]; then
+    echo "✔ Backup uploaded successfully."
+else
+    echo "❌ Upload failed!"
+    exit 1
+fi
+
+# Step 3: Automatically Delete Table
+echo "⚠️  Deleting table 'users' from PostgreSQL..."
+sudo -u $PG_USER psql -d $PG_DB -c "DROP TABLE IF EXISTS users;"
+
+if [ $? -eq 0 ]; then
+    echo "✔ Table 'users' deleted successfully."
+else
+    echo "❌ Table deletion failed!"
+    exit 1
+fi
+
+# Step 4: List Available Backups in Storage
+echo "=== Available Backup Files ==="
+az storage blob list \
+  --account-name $STORAGE_ACCOUNT \
+  --container-name $CONTAINER \
+  --account-key $ACCOUNT_KEY \
+  --query "[].{name:name}" --output table
+
+# Step 5: Restore the Latest Backup
+LATEST_BACKUP=$(az storage blob list \
+  --account-name $STORAGE_ACCOUNT \
+  --container-name $CONTAINER \
+  --account-key $ACCOUNT_KEY \
+  --query "[].{name:name}" --output tsv | tail -n 1)
+
+if [ -z "$LATEST_BACKUP" ]; then
+    echo "❌ No backup found in storage!"
+    exit 1
+fi
+
+DOWNLOAD_PATH="/tmp/restored_backup.sql"
+echo "✔ Downloading backup: $LATEST_BACKUP"
+az storage blob download \
+  --account-name $STORAGE_ACCOUNT \
+  --container-name $CONTAINER \
+  --name $LATEST_BACKUP \
+  --file $DOWNLOAD_PATH \
+  --account-key $ACCOUNT_KEY
+
+if [ $? -eq 0 ]; then
+    echo "✔ Backup downloaded successfully."
+else
+    echo "❌ Download failed!"
+    exit 1
+fi
+
+# Step 6: Restore the Backup to PostgreSQL
+echo "✔ Restoring database from backup..."
+sudo -u $PG_USER psql $PG_DB < $DOWNLOAD_PATH
+
+if [ $? -eq 0 ]; then
+    echo "✔ Database restored successfully!"
+else
+    echo "❌ Restore failed!"
+    exit 1
+fi
+
+echo "🎉 Backup and Restore Process Completed!"

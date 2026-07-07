@@ -1,0 +1,41 @@
+pipeline {
+    agent any
+
+    environment {
+        REMOTE_SERVER = 'your_remote_server_ip'
+        REMOTE_USER = 'your_remote_username'
+        JAR_FILE_NAME = 'your_application.jar'
+        REMOTE_DESTINATION_PATH = '/path/to/remote/directory'
+    }
+
+    stages {
+        stage('Checkout and Build') {
+            steps {
+                checkout scm
+                script {
+                    sh 'mvn clean package'
+                }
+            }
+        }
+
+        stage('Deploy to Remote Server') {
+            steps {
+                script {
+                    def jarFileName = sh(script: 'ls target/*.jar | head -n 1', returnStdout: true).trim()
+
+                    if (jarFileName) {
+                        echo "Copying ${jarFileName} to remote server..."
+                        sshagent(['your_ssh_credentials']) {
+                            sshCommand remote: "your_remote_server_ip", user: "your_remote_username", command: """
+                                scp -o StrictHostKeyChecking=no ${jarFileName} ${REMOTE_USER}@${REMOTE_SERVER}:${REMOTE_DESTINATION_PATH}/${JAR_FILE_NAME}
+                            """
+                        }
+                        echo "Deployed ${jarFileName} to remote server."
+                    } else {
+                        error "No JAR file found in target directory."
+                    }
+                }
+            }
+        }
+    }
+}

@@ -1,0 +1,18 @@
+sudo apt install make -y
+sudo apt install make-guile -y 
+
+https://github.com/vaibhavkarade/python-webapp/blob/master/makefile
+
+make file:
+
+IMAGE_REG ?= docker.io
+IMAGE_REPO ?= vaibhavkarade/python-demoapp
+IMAGE_TAG ?= latest
+
+
+
+Flask>=2.2.2 in requirements.txt
+
+
+
+make file: kept all commands in make file for automation

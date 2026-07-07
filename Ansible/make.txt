@@ -1,0 +1,10 @@
+---
+- name: Install Make
+  hosts: all
+  become: yes  # Use elevated privileges
+
+  tasks:
+    - name: Install Make on Debian/Ubuntu
+      apt:
+        name: make
+        state: present

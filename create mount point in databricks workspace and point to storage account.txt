@@ -1,0 +1,102 @@
+Dev
+
+
+clientid="e299a49b-b9db-48d6-af41-e2da704d6894"
+tenant_id="95e66ecc-f2c2-464b-84d9-8fda407bc923"
+clsecret="Mbn8Q~zKJ16HZvfmu9P.bURkLnhfL37KU7xQFcnx"
+configs = {
+    "fs.azure.account.auth.type": "OAuth",
+    "fs.azure.account.oauth.provider.type": "org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider",
+    "fs.azure.account.oauth2.client.id": clientid,
+    "fs.azure.account.oauth2.client.secret": clsecret,
+    "fs.azure.account.oauth2.client.endpoint": "https://login.microsoftonline.com/95e66ecc-f2c2-464b-84d9-8fda407bc923/oauth2/token"
+}
+# Optionally, you can add <directory-name> to the source URI of your mount point.
+dbutils.fs.mount(
+    source="wasbs://nielsen-rgm@satrinityprodrgmxst.blob.core.windows.net",
+    mount_point="/mnt/nielsen-rgm",
+    extra_configs=configs
+)
+
+
+
+
+display(dbutils.fs.ls("/mnt/TRINITY-RGM-PROD"))
+
+
+
+Test env
+
+clientid="8f93b6b7-d555-4c51-b892-ac52f0a3e155"
+tenant_id="95e66ecc-f2c2-464b-84d9-8fda407bc923"
+clsecret="~Sj8Q~cQa8F16P-p50r9sHvrqBcHM3leOhRPAaU9"
+configs = {
+    "fs.azure.account.auth.type": "OAuth",
+    "fs.azure.account.oauth.provider.type": "org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider",
+    "fs.azure.account.oauth2.client.id": clientid,
+    "fs.azure.account.oauth2.client.secret": clsecret,
+    "fs.azure.account.oauth2.client.endpoint": "https://login.microsoftonline.com/95e66ecc-f2c2-464b-84d9-8fda407bc923/oauth2/token"
+}
+# Optionally, you can add <directory-name> to the source URI of your mount point.
+dbutils.fs.mount(
+    source="wasbs://nielsen-rgm@satrinityprodrgmxst.blob.core.windows.net",
+    mount_point="/mnt/nielsen-rgm",
+    extra_configs=configs
+)
+
+
+
+clientid="8f93b6b7-d555-4c51-b892-ac52f0a3e155"
+tenant_id="95e66ecc-f2c2-464b-84d9-8fda407bc923"
+clsecret="~Sj8Q~cQa8F16P-p50r9sHvrqBcHM3leOhRPAaU9"
+configs = {
+    "fs.azure.account.auth.type": "OAuth",
+    "fs.azure.account.oauth.provider.type": "org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider",
+    "fs.azure.account.oauth2.client.id": clientid,
+    "fs.azure.account.oauth2.client.secret": clsecret,
+    "fs.azure.account.oauth2.client.endpoint": "https://login.microsoftonline.com/95e66ecc-f2c2-464b-84d9-8fda407bc923/oauth2/token"
+}
+# Optionally, you can add <directory-name> to the source URI of your mount point.
+dbutils.fs.mount(
+    source=" abfss://adlstrinitydevdatacorest-gold@satrinitydevdatacorest01.dfs.core.windows.net",
+    mount_point="/mnt/TRINITY-GOLD",
+    extra_configs=configs
+)
+
+
+
+
+clientid="8f93b6b7-d555-4c51-b892-ac52f0a3e155"
+tenant_id="95e66ecc-f2c2-464b-84d9-8fda407bc923"
+clsecret="~Sj8Q~cQa8F16P-p50r9sHvrqBcHM3leOhRPAaU9"
+configs = {
+    "fs.azure.account.auth.type": "OAuth",
+    "fs.azure.account.oauth.provider.type": "org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider",
+    "fs.azure.account.oauth2.client.id": clientid,
+    "fs.azure.account.oauth2.client.secret": clsecret,
+    "fs.azure.account.oauth2.client.endpoint": "https://login.microsoftonline.com/95e66ecc-f2c2-464b-84d9-8fda407bc923/oauth2/token"
+}
+# Optionally, you can add <directory-name> to the source URI of your mount point.
+dbutils.fs.mount(
+    source="abfss://adlstrinitytestrgmst@satrinitytestrgmst1.dfs.core.windows.net",
+    mount_point="/mnt/TRINITY-RGM-TEST",
+    extra_configs=configs
+)
+
+
+clientid="8f93b6b7-d555-4c51-b892-ac52f0a3e155"
+tenant_id="95e66ecc-f2c2-464b-84d9-8fda407bc923"
+clsecret="~Sj8Q~cQa8F16P-p50r9sHvrqBcHM3leOhRPAaU9"
+configs = {
+    "fs.azure.account.auth.type": "OAuth",
+    "fs.azure.account.oauth.provider.type": "org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider",
+    "fs.azure.account.oauth2.client.id": clientid,
+    "fs.azure.account.oauth2.client.secret": clsecret,
+    "fs.azure.account.oauth2.client.endpoint": "https://login.microsoftonline.com/95e66ecc-f2c2-464b-84d9-8fda407bc923/oauth2/token"
+}
+# Optionally, you can add <directory-name> to the source URI of your mount point.
+dbutils.fs.mount(
+    source="abfss://adlstrinitydevrgmst@satrinitydevrgmst.dfs.core.windows.net",
+    mount_point="/mnt/TRINITY-RGM-DEV",
+    extra_configs=configs
+)

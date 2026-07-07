@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# Variables
+PG_DB="mydatabase"
+PG_USER="postgres"
+STORAGE_ACCOUNT="mypgstorageacct"
+CONTAINER="pgbackups"
+ACCOUNT_KEY="your_storage_account_key"
+DOWNLOAD_PATH="/tmp/restored_backup.sql"
+
+echo "=== Searching for Latest Backup ==="
+
+# Step 1: Get the latest backup filename from Azure Storage
+LATEST_BACKUP=$(az storage blob list \
+  --account-name $STORAGE_ACCOUNT \
+  --container-name $CONTAINER \
+  --account-key $ACCOUNT_KEY \
+  --query "[].{name:name}" --output tsv | tail -n 1)
+
+if [ -z "$LATEST_BACKUP" ]; then
+    echo "❌ No backup found in storage!"
+    exit 1
+fi
+
+echo "✔ Found backup: $LATEST_BACKUP"
+
+# Step 2: Download the backup
+az storage blob download \
+  --account-name $STORAGE_ACCOUNT \
+  --container-name $CONTAINER \
+  --name $LATEST_BACKUP \
+  --file $DOWNLOAD_PATH \
+  --account-key $ACCOUNT_KEY
+
+if [ $? -eq 0 ]; then
+    echo "✔ Backup downloaded successfully."
+else
+    echo "❌ Download failed!"
+    exit 1
+fi
+
+# Step 3: Restore the backup
+echo "✔ Restoring database from backup..."
+sudo -u $PG_USER psql $PG_DB < $DOWNLOAD_PATH
+
+if [ $? -eq 0 ]; then
+    echo "✔ Database restored successfully!"
+else
+    echo "❌ Restore failed!"
+    exit 1
+fi
+
+# Step 4: Check if the 'users' table exists
+TABLE_EXISTS=$(sudo -u $PG_USER psql -d $PG_DB -t -c "SELECT to_regclass('users');")
+
+if [[ $TABLE_EXISTS == " users" ]]; then
+    echo "✔ Table 'users' successfully restored!"
+else
+    echo "❌ Table 'users' does not exist!"
+fi
+
+echo "🎉 Restore Process Completed!"

@@ -1,0 +1,88 @@
+# ------------------------- CONFIGURATION -------------------------
+Write-Output "🔧 Starting work item fetch script..."
+
+# Define variables
+$organization = "DevOpsStuffs"                                # Replace with your Azure DevOps organization name
+$project = "WorkItemAutomation"                               # Replace with your Azure DevOps project name
+$iterationPath = "WorkItemAutomation\Iteration 1\sprint1"     # Replace with your iteration path
+$pat = "n1b7ZrPQsG2ieC8IsOW3Pj8KWqkKCJ6ZBPXiVV7zYSIgVlaU97LgJQQJ99BGACAAAAAc0or1AAASAZDO3TJs"  # Replace with your PAT
+
+# Prepare authentication information
+$base64AuthInfo = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$pat"))
+
+Write-Output "🔐 Auth info prepared"
+Write-Output "📍 Iteration path = $iterationPath"
+
+# ------------------------- WIQL QUERY -------------------------
+$wiqlQuery = @"
+SELECT [System.Id]
+FROM WorkItems
+WHERE [System.TeamProject] = '$project'
+AND [System.WorkItemType] = 'User Story'
+AND [System.State] = 'Resolved'
+AND [System.IterationPath] = '$iterationPath'
+"@
+
+Write-Output "📝 WIQL Query:"
+Write-Output $wiqlQuery
+
+$wiql = @{ query = $wiqlQuery }
+
+try {
+    # Send the WIQL query
+    Write-Output "📡 Sending WIQL query..."
+    $uri = "https://dev.azure.com/$organization/$project/_apis/wit/wiql?api-version=6.0"
+
+    $response = Invoke-RestMethod -Uri $uri `
+        -Method Post `
+        -Body ($wiql | ConvertTo-Json -Depth 10 -Compress) `
+        -Headers @{
+            Authorization = "Basic $base64AuthInfo"
+            "Content-Type" = "application/json"
+        }
+
+    $workItems = $response.workItems
+    Write-Output "✅ WIQL response received."
+
+    # Check if any work items are retrieved
+    if (!$workItems -or $workItems.Count -eq 0) {
+        Write-Output "ℹ️ No 'Resolved' user stories found in iteration path: $iterationPath"
+        return
+    }
+
+    Write-Output "🔍 Found $($workItems.Count) user stories in 'Resolved' state."
+
+    # Refactor $workItemIds handling
+    # Use direct extraction for IDs and join them as a string
+    $workItemIdsString = ($workItems.id) -join ','
+
+    # Build the bulk query URL
+    $detailsUri = "https://dev.azure.com/$organization/_apis/wit/workitems?ids=$workItemIdsString&api-version=6.0"
+
+    Write-Output "📡 Fetching full details for work items..."
+    $detailsResponse = Invoke-RestMethod -Uri $detailsUri -Headers @{ Authorization = "Basic $base64AuthInfo" }
+
+    # Process and display the work item details
+    foreach ($workItem in $detailsResponse.value) {
+        $id = $workItem.id
+        $title = $workItem.fields.'System.Title'
+        $state = $workItem.fields.'System.State'
+
+        # Updated check for 'System.AssignedTo'
+        if ($workItem.fields.PSObject.Properties.Match("System.AssignedTo").Count -gt 0) {
+            $assignedTo = $workItem.fields.'System.AssignedTo'.displayName
+        } else {
+            $assignedTo = "Unassigned"
+        }
+
+        # Fixed Write-Output line
+        Write-Output "➡️ Work Item #$($id): '$($title)' | State: $($state) | Assigned To: $($assignedTo)"
+    }
+
+} catch {
+    # Handle exceptions
+    Write-Output "❌ Exception occurred: $($_.Exception.Message)"
+    if ($_.ErrorDetails) {
+        Write-Output "📄 Details: $($_.ErrorDetails.Message)"
+    }
+}

@@ -1,0 +1,28 @@
+---
+- name: Create Minikube cluster
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: Install required packages
+      become: true
+      apt:
+        name: "{{ item }}"
+        state: present
+      with_items:
+        - curl
+        - apt-transport-https
+
+
+    - name: Download and install Minikube
+      become: true
+      shell: |
+        curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
+        sudo install minikube-linux-amd64 /usr/local/bin/minikube
+
+    - name: Start Minikube cluster
+      become: true
+      shell: minikube start --driver=docker
+
+    - name: Check Minikube status
+      become: true
+      shell: minikube status

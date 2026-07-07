@@ -1,0 +1,6 @@
+kubectl port-forward svc/prometheus-grafana 3000:80 --namespace monitoring --address 0.0.0.0
+kubectl port-forward svc/prometheus-operated 9090:9090 --namespace monitoring --address 0.0.0.0
+
+
+
+forwarding the Prometheus and Grafana from cluster IP in AKS to node port(ubuntu machine)

@@ -1,0 +1,35 @@
+stages:
+  - deploy
+
+deploy_mongodb_restore:
+  stage: deploy
+  script:
+    # Setup SSH key for the GitLab Runner to access the machines
+    - echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa  # Get SSH private key from GitLab variable
+    - chmod 600 ~/.ssh/id_rsa  # Ensure the correct permissions for the key
+
+    # Optionally, add remote hosts to known_hosts to avoid SSH host verification prompt
+    - ssh-keyscan -H 13.68.202.73 >> ~/.ssh/known_hosts  # MongoDB machine
+    - ssh-keyscan -H 172.178.16.246 >> ~/.ssh/known_hosts  # MongoDB restore machine
+
+    # Run the Ansible playbook to restore MongoDB
+    - cd $CI_PROJECT_DIR  # Navigate to repo directory
+    - ansible-playbook restore_mongodbnew.yml  # Run the playbook
+
+  tags:
+    - ansible-runner  # Ensure the correct runner is used
+  only:
+    - main  # Only run on the main branch
+
+
+
+
+
+Note:SSH_PRIVATE_KEY--- added ssh key generated in ansible machine which is id_rsa under /home/bunty/.ssh
+
+locally for connecting to both targets from ansible machine you can copy either authorized keys or id_rsa to target machines path will be /home/bunty/.ssh
+
+
+but for GitLab prefer using id_rsa key in GitLab pipeline or locally
+
+for Azure pipeline you can use authorized keys locally 

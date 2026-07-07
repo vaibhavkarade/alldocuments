@@ -1,0 +1,62 @@
+# Variables
+$orgName = "DevOpsStuffs"
+$projectName = "WorkItemAutomation"
+$iterationPath = "WorkItemAutomation\CommonIteration\Sprint 1"
+
+# Fetch PAT securely
+$pat = Get-AutomationVariable -Name "AzureDevOpsPAT"
+
+# Encode the PAT in Base64
+$encodedAuth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$pat"))
+$headers = @{
+    Authorization = "Basic $encodedAuth"
+    "Content-Type" = "application/json"
+}
+
+Write-Output "🔍 Debugging Information:"
+Write-Output "🔹 Organization: $orgName"
+Write-Output "🔹 Project: $projectName"
+Write-Output "🔹 Iteration Path: $iterationPath"
+Write-Output "🔹 Testing WIQL Query..."
+
+# WIQL Query to find 'Resolved' work items
+$wiqlQuery = @{
+    query = "SELECT [System.Id], [System.Title] FROM WorkItems 
+             WHERE [System.State] = 'Resolved' 
+             AND [System.IterationPath] = '$iterationPath'"
+} | ConvertTo-Json -Depth 3
+
+$wiqlUrl = "https://dev.azure.com/$orgName/$projectName/_apis/wit/wiql?api-version=7.1"
+
+try {
+    $response = Invoke-RestMethod -Uri $wiqlUrl -Headers $headers -Method Post -Body $wiqlQuery
+    $workItems = $response.workItems
+} catch {
+    Write-Output "❌ Failed to fetch work items. Error: $_"
+    exit 1
+}
+
+# Check if any work items found
+if (-not $workItems) {
+    Write-Output "✅ No 'Resolved' work items found in '$iterationPath'."
+    exit 0
+}
+
+Write-Output "✅ Found $($workItems.Count) work items in 'Resolved' state."
+
+# Convert Work Item IDs to a comma-separated string
+$workItemIds = ($workItems.id -join ",")
+
+# Corrected API URL to fetch multiple work items
+$getWorkItemsUrl = "https://dev.azure.com/$orgName/_apis/wit/workitems?ids=$workItemIds&api-version=7.1"
+
+try {
+    $workItemsData = Invoke-RestMethod -Uri $getWorkItemsUrl -Headers $headers -Method Get
+    foreach ($workItem in $workItemsData.value) {
+        Write-Output "🔹 Work Item ID: $($workItem.id) - Title: $($workItem.fields.'System.Title') - State: $($workItem.fields.'System.State')"
+    }
+} catch {
+    Write-Output "❌ Failed to fetch work item details. Error: $_"
+}
+
+Write-Output "🎉 Work item fetching completed successfully!"

@@ -1,0 +1,83 @@
+pipeline {
+    agent any
+    
+    
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'
+        AZURE_CLIENT_ID = '410ada39-774d-4090-880b-59d78eea961c'
+        AZURE_CLIENT_SECRET = credentials('azure-sp-credential')
+        AZURE_TENANT_ID = 'b41b72d0-4e9f-4c26-8a69-f949f367c91d'
+        RESOURCE_GROUP = 'myResourceGroup'
+        AKS_NAME = 'myAKSCluster'
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                git branch: 'master', url: 'https://github.com/vaibhavkarade/DevOps-Project-Swiggy.git'
+            }
+        }
+        
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar') {
+                    sh "$SCANNER_HOME/bin/sonar-scanner -Dsonar.projectKey=swiggyapp -Dsonar.projectName=swiggyapp -Dsonar.java.binaries=."
+                }
+            }
+        }
+        
+        stage('Trivy FS Scan') {
+            steps {
+                sh "trivy fs --format table -o fs.html ."
+            }
+        }
+        
+        stage('Build') {
+            steps {
+                sh "npm install"
+            }
+        }
+        
+        stage('Docker Build') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker-cred') {
+                        sh "docker build -t vaibhavkarade/swiggyapp:latest ."
+                    }
+                }
+            }
+        }
+        
+        stage('Trivy Image Scan') {
+            steps {
+                sh "trivy image --format table -o image.html vaibhavkarade/swiggyapp:latest"
+            }
+        }
+        
+        stage('Docker Push Image') {
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker-cred') {
+                        sh "docker push vaibhavkarade/swiggyapp:latest"
+                    }
+                }
+            }
+        }
+        
+        stage('Deployment to AKS') {
+            steps {
+                script {
+                    sh """
+                    az logout
+                    az login --service-principal -u $AZURE_CLIENT_ID -p $AZURE_CLIENT_SECRET --tenant $AZURE_TENANT_ID
+                    az aks get-credentials --resource-group $RESOURCE_GROUP --name $AKS_NAME
+                    kubectl apply -f ArgoCD/deployment.yml -n webapps
+                    kubectl apply -f ArgoCD/service.yml -n webapps
+                    """
+                }
+            }
+        }
+        
+    }
+}
+    

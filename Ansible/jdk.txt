@@ -1,0 +1,13 @@
+---
+- name: Install JDK
+  hosts: all
+  become: true
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+    - name: Install JDK package
+      apt:
+        name: openjdk-11-jdk  # Change the package name if you need a different version
+        state: present
+      become: true

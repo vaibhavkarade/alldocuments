@@ -1,0 +1,28 @@
+---
+- name: Install Jenkins
+  hosts: all
+  become: true
+  tasks:
+    - name: Add Jenkins repository key
+      apt_key:
+        url: https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+        state: present
+
+    - name: Add Jenkins repository
+      apt_repository:
+        repo: deb https://pkg.jenkins.io/debian-stable binary/
+        state: present
+
+    - name: Install Java (required by Jenkins)
+      apt:
+        name: openjdk-11-jdk
+        state: present
+
+    - name: Update package cache
+      apt:
+        update_cache: yes
+
+    - name: Install Jenkins
+      apt:
+        name: jenkins
+        state: present

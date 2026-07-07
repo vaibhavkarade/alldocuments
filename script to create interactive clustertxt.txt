@@ -1,0 +1,99 @@
+############################################
+# HARD-CODED CONFIGURATION
+############################################
+
+# Azure
+$SubscriptionId = "4644440b-bc86-4390-be9f-3b9cd524ba60"
+
+# Databricks Workspace
+$DatabricksUrl = "https://adb-7405617945742447.7.azuredatabricks.net"
+
+# Key Vault
+$KeyVaultName  = "autokeycicd"
+$PatSecretName = "Dbx-Dev-PAT"
+
+# Databricks Cluster Configuration
+$ClusterName       = "interactive-cluster-dev"
+$SparkVersion      = "13.3.x-scala2.12"
+$NodeTypeId        = "Standard_DS3_v2"
+$AutoTerminateMins = 10   # ⬅ UPDATED
+
+# Autoscaling
+$MinWorkers = 1
+$MaxWorkers = 4
+
+############################################
+# LOGIN USING MANAGED IDENTITY
+############################################
+
+Write-Output "Logging in to Azure using Managed Identity..."
+Connect-AzAccount -Identity -SubscriptionId $SubscriptionId
+
+############################################
+# GET PAT TOKEN FROM KEY VAULT
+############################################
+
+Write-Output "Fetching Databricks PAT token from Key Vault..."
+
+$PatToken = Get-AzKeyVaultSecret `
+    -VaultName $KeyVaultName `
+    -Name $PatSecretName `
+    -AsPlainText
+
+$Headers = @{
+    Authorization = "Bearer $PatToken"
+    "Content-Type" = "application/json"
+}
+
+############################################
+# CHECK IF CLUSTER EXISTS (IDEMPOTENT)
+############################################
+
+Write-Output "Checking if Databricks cluster already exists..."
+
+$ClusterList = Invoke-RestMethod `
+    -Method GET `
+    -Uri "$DatabricksUrl/api/2.0/clusters/list" `
+    -Headers $Headers
+
+$ExistingCluster = $ClusterList.clusters | Where-Object {
+    $_.cluster_name -eq $ClusterName
+}
+
+if ($ExistingCluster) {
+    Write-Output "Cluster '$ClusterName' already exists. Skipping creation."
+    return
+}
+
+############################################
+# CREATE INTERACTIVE CLUSTER (AUTOSCALING)
+############################################
+
+Write-Output "Creating interactive Databricks cluster with autoscaling..."
+
+$ClusterPayload = @{
+    cluster_name            = $ClusterName
+    spark_version           = $SparkVersion
+    node_type_id            = $NodeTypeId
+    autotermination_minutes = $AutoTerminateMins
+    cluster_source          = "UI"
+
+    autoscale = @{
+        min_workers = $MinWorkers
+        max_workers = $MaxWorkers
+    }
+
+    spark_conf  = @{}
+    custom_tags = @{
+        Environment = "Dev"
+        CreatedBy  = "AzureAutomation"
+    }
+} | ConvertTo-Json -Depth 10
+
+Invoke-RestMethod `
+    -Method POST `
+    -Uri "$DatabricksUrl/api/2.0/clusters/create" `
+    -Headers $Headers `
+    -Body $ClusterPayload
+
+Write-Output "Interactive autoscaling Databricks cluster '$ClusterName' created successfully."

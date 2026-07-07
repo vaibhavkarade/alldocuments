@@ -1,0 +1,153 @@
+trigger:
+- master
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+- group: 'DEV'
+- name: branchName
+  value: $(Build.SourceBranch)
+- name: folderName
+  value: release
+
+stages:
+- stage: Dev
+  displayName: Development Stage
+  jobs:
+  - job: DeployToDev
+    displayName: Deploy to Development
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+    - task: PublishPipelineArtifact@1
+      inputs:
+        targetPath: '$(Build.Repository.LocalPath)/'
+        artifact: 'Databricks'
+        publishLocation: 'pipeline'
+
+    - script: pip install databricks-cli
+      displayName: "Install Databricks CLI"
+
+    - script: |
+        echo "$(databricksHost) $(databricksToken)" | databricks configure --token
+      displayName: "Configure Databricks CLI"
+
+    - script: |
+        databricks workspace ls
+      displayName: "Test Databricks CLI"
+
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        source: current
+        artifact: 'Databricks'
+        downloadPath: $(System.ArtifactsDirectory)/databricks
+
+    - script: 'ls $(System.ArtifactsDirectory)/databricks'
+
+    - script: |
+        BRANCH_NAME=$(echo $(Build.SourceBranch) | awk -F/ '{print $NF}')
+        FOLDER=$(echo /$(folderName))
+        echo $FOLDER
+        folder=$(databricks workspace ls --id $FOLDER)
+        databricks workspace rm $FOLDER --recursive
+      displayName: 'Delete old release'
+
+    - script: |
+        BRANCH_NAME=$(echo $(Build.SourceBranch) | awk -F/ '{print $NF}')
+        FOLDER=$(echo /$(folderName))
+        echo $FOLDER
+        databricks workspace import_dir $(System.ArtifactsDirectory)/databricks $FOLDER --exclude-hidden-files
+      displayName: 'New Release'
+
+    - script: |
+        FOLDER=$(echo /$(folderName))
+        NOTEBOOKS=$(databricks workspace ls $FOLDER)
+        for NOTEBOOK in $NOTEBOOKS; do
+          databricks jobs create --json '{
+            "name": "'$NOTEBOOK' Job",
+            "new_cluster": {
+              "spark_version": "7.3.x-scala2.12",
+              "node_type_id": "Standard_D3_v2",
+              "num_workers": 2
+            },
+            "notebook_task": {
+              "notebook_path": "'$FOLDER/$NOTEBOOK'"
+            },
+            "schedule": {
+              "quartz_cron_expression": "0 0 * * * ?",
+              "timezone_id": "UTC"
+            }
+          }'
+        done
+      displayName: 'Schedule Notebooks'
+
+- stage: Prod
+  displayName: Production Stage
+  jobs:
+  - job: DeployToProd
+    displayName: Deploy to Production
+    pool:
+      vmImage: ubuntu-latest
+    variables:
+    - group: 'PROD'
+    - name: branchName
+      value: $(Build.SourceBranch)
+    - name: folderName
+      value: release
+    steps:
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        source: current
+        artifact: 'Databricks'
+        downloadPath: $(System.ArtifactsDirectory)/databricks
+
+    - script: pip install databricks-cli
+      displayName: "Install Databricks CLI"
+
+    - script: |
+        echo "$(databricksHost) $(databricksToken)" | databricks configure --token
+      displayName: "Configure Databricks CLI"
+
+    - script: |
+        databricks workspace ls
+      displayName: "Test Databricks CLI"
+
+    - script: 'ls $(System.ArtifactsDirectory)/databricks'
+
+    - script: |
+        BRANCH_NAME=$(echo $(Build.SourceBranch) | awk -F/ '{print $NF}')
+        FOLDER=$(echo /$(folderName))
+        echo $FOLDER
+        folder=$(databricks workspace ls --id $FOLDER)
+        databricks workspace rm $FOLDER --recursive
+      displayName: 'Delete old release'
+
+    - script: |
+        BRANCH_NAME=$(echo $(Build.SourceBranch) | awk -F/ '{print $NF}')
+        FOLDER=$(echo /$(folderName))
+        echo $FOLDER
+        databricks workspace import_dir $(System.ArtifactsDirectory)/databricks $FOLDER --exclude-hidden-files
+      displayName: 'New Release'
+
+    - script: |
+        FOLDER=$(echo /$(folderName))
+        NOTEBOOKS=$(databricks workspace ls $FOLDER)
+        for NOTEBOOK in $NOTEBOOKS; do
+          databricks jobs create --json '{
+            "name": "'$NOTEBOOK' Job",
+            "new_cluster": {
+              "spark_version": "7.3.x-scala2.12",
+              "node_type_id": "Standard_D3_v2",
+              "num_workers": 2
+            },
+            "notebook_task": {
+              "notebook_path": "'$FOLDER/$NOTEBOOK'"
+            },
+            "schedule": {
+              "quartz_cron_expression": "0 0 * * * ?",
+              "timezone_id": "UTC"
+            }
+          }'
+        done
+      displayName: 'Schedule Notebooks'

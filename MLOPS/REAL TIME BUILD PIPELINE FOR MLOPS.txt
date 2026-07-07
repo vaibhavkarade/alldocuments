@@ -1,0 +1,115 @@
+pool:
+  name: Azure Pipelines
+#Your build pipeline references an undefined variable named ‘az ml datastore show-default -w $(azureml.workspacename’. Create or edit the build pipeline for this YAML file, define the variable on the Variables tab. See https://go.microsoft.com/fwlink/?linkid=865972
+#Your build pipeline references an undefined variable named ‘jq -r .modelId metadata/model.json’. Create or edit the build pipeline for this YAML file, define the variable on the Variables tab. See https://go.microsoft.com/fwlink/?linkid=865972
+variables:
+  azureml.resourcegroup: 'mlrgci-cd'
+  azureml.workspacename: 'mlci-cd'
+  azureml.location: 'eastUS'
+
+steps:
+- task: UsePythonVersion@0
+  displayName: 'Use Python 3.6'
+  inputs:
+    versionSpec: 3.6
+
+- task: Bash@3
+  displayName: 'install python requirements'
+  inputs:
+    targetType: filePath
+    filePath: './package_requirement/install_requirements.sh'
+    workingDirectory: 'package_requirement'
+
+- bash: 'pytest training/train_test.py --doctest-modules --junitxml=junit/test-results.xml --cov=data_test --cov-report=xml --cov-report=html'
+  displayName: 'data test'
+
+- task: PublishTestResults@2
+  displayName: 'Publish Test Results **/test-*.xml'
+  inputs:
+    testResultsFiles: '**/test-*.xml'
+
+- task: AzureCLI@2
+  displayName: 'install Azure ML CLI '
+  inputs:
+    azureSubscription: 'azure-connection'
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: 'az extension add -n azure-cli-ml'
+
+- task: AzureCLI@2
+  displayName: 'create azure ml workspace'
+  inputs:
+    azureSubscription: 'azure-connection'
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: |
+     az ml workspace create -g $(azureml.resourcegroup) -w $(azureml.workspacename) -l $(azureml.location) 
+     
+     
+     
+     az ml workspace create -g $(azureml.resourcegroup) -w $(azureml.workspacename) -l $(azureml.location) --exist-ok --yes
+
+- task: AzureCLI@2
+  displayName: 'azure ml compute cluster'
+  inputs:
+    azureSubscription: 'azure-connection'
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: 'az ml computetarget create amlcompute -g $(azureml.resourcegroup) -w $(azureml.workspacename) -n $(amlcompute.clustername) -s $(amlcompute.vmsize) --min-nodes $(amlcompute.minnodes) --max-nodes $(amlcompute.maxnodes) --idle-seconds-before-scaledown $(amlcompute.idlesecondsbeforescaledown)'
+
+- task: AzureCLI@2
+  displayName: 'upload data to datastore'
+  inputs:
+    azureSubscription: 'azure-connection'
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: 'az ml datastore upload -w $(azureml.workspacename) -g $(azureml.resourcegroup) -n $(az ml datastore show-default -w $(azureml.workspacename) -g $(azureml.resourcegroup) --query name -o tsv) -p data -u insurance --overwrite true'
+
+- bash: |
+   mkdir metadata && mkdir models
+   
+  displayName: 'make metadata and models directory'
+
+- task: AzureCLI@2
+  displayName: 'Training model'
+  inputs:
+    azureSubscription: 'azure-connection'
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: 'az ml run run submit-script -g $(azureml.resourcegroup) -w $(azureml.workspacename) -e $(experiment.name) --ct $(amlcompute.clustername) -d conda_dependencies.yml -c train_insurance -t ~/metadata/run.json train_aml.py'
+    workingDirectory: training
+
+- task: AzureCLI@2
+  displayName: 'Registering model'
+  inputs:
+    azureSubscription: 'azure-connection'
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: 'az model register -g $(azureml.resourcegroup) -w $(azureml.workspacename) -n $(model.name) -f metadata/run.json --asset-path outputs/models/insurance_model.pkl -d "classification model for filing a claim prediction" --tag "data"="insurance" --tag "model"="classification" --model-framework ScikitLearn -t metadata/model.json'
+
+- task: AzureCLI@2
+  displayName: 'Downloading model'
+  inputs:
+    azureSubscription: 'azure-connection'
+    scriptType: bash
+    scriptLocation: inlineScript
+    inlineScript: 'az model download -g $(azureml.resourcegroup) -w $(azureml.workspacename) -i $(jq -r .modelId metadata/model.json) -t ./models --overwrite'
+
+- task: CopyFiles@2
+  displayName: 'Copy Files to: $(Build.ArtifactStagingDirectory)'
+  inputs:
+    SourceFolder: '$(Build.SourcesDirectory)'
+    Contents: |
+     **/deployment/*
+     **/tests/integration/*
+     **/package_requirement/*
+     **/metadata/*
+     **/models/*
+     
+    TargetFolder: '$(Build.ArtifactStagingDirectory)'
+
+- task: PublishPipelineArtifact@1
+  displayName: 'Publish Pipeline Artifact'
+  inputs:
+    targetPath: '$(Build.ArtifactStagingDirectory)'
+    artifact: landing

@@ -1,0 +1,15 @@
+• Tell me about yourself and your experience.
+• Explain your project in detail — what’s your domain, and what exactly does your application do (high-level explanation).
+• How do you troubleshoot issues when a ticket or incident is assigned to you?
+• Scenario: If some users cannot access the application, how will you troubleshoot?
+• Scenario: If the entire application is down, what steps will you follow as a DevOps/Application Support Engineer to restore services?
+• How are tickets assigned, and what’s the flow from incident creation to resolution?
+• Explain IaaS, PaaS, and SaaS with real-time examples.
+• What are the Azure services you have worked with?
+• Difference between Azure Hot Storage and Cold Storage.
+• Basic SQL queries and JOINs questions.
+• Difference between INNER JOIN and OUTER JOIN.
+• Scenario: If the SQL Server is not responding, how do you troubleshoot and optimize it?
+• Have you worked on Grafana or Prometheus?
+• How do you write queries and design dashboards to monitor CPU, memory, disk usage, and latency?
+• How do you handle alerts and ensure system stability?

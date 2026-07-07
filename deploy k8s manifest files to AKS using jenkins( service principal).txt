@@ -1,0 +1,55 @@
+pipeline {
+    agent any
+
+environment {
+        AZURE_CLIENT_ID = '7ce52e5f-8cdb-409d-9072-aace2b7f5c5b'
+        AZURE_CLIENT_SECRET = credentials('azure-sp-credential')
+        AZURE_TENANT_ID = 'b41b72d0-4e9f-4c26-8a69-f949f367c91d'
+        RESOURCE_GROUP = 'test'
+        AKS_NAME = 'testcluster'
+    }
+    
+    
+    stages {
+        stage('git checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/vaibhavkarade/Multi-Tier-With-Database.git'
+            }
+        }
+        
+        stage('build') {
+            steps {
+                sh "mvn package -DskipTests=true"
+            }
+        }
+        
+        stage('docker build') {
+            steps {
+                script { 
+                    withDockerRegistry(credentialsId: 'docker-cred') {
+                     sh "docker build -t vaibhavkarade/bankapplication:latest ."
+                     sh "docker push vaibhavkarade/bankapplication:latest"
+                    }
+                
+                    }
+            }
+        }
+        
+        stage('Deploy to K8s') {
+            steps {
+              script{
+                  
+               sh '''
+                    az login --service-principal -u $AZURE_CLIENT_ID -p $AZURE_CLIENT_SECRET --tenant$AZURE_TENANT_ID
+                    az aks get-credentials --resource-group $RESOURCE_GROUP --name $AKS_NAME
+                    kubectl apply -f ds.yml -n webapps
+                    '''
+                        
+              }
+             
+                   }
+            }
+        }
+        
+    }
+

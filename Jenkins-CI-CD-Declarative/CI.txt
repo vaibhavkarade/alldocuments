@@ -1,0 +1,56 @@
+pipeline {
+    agent any
+    tools{
+        jdk "jdk17"
+        maven "maven3"
+        
+    }
+    environment {
+        SCANNER_HOME=tool 'sonar-scanner'
+    }
+
+    stages {
+        stage('Git Checkout') {
+            steps {
+                checkout scmGit(branches: [[name: '*/main']], extensions: [], userRemoteConfigs: [[url: 'https://github.com/vaibhavkarade/shopping-cart.git']])
+            }
+        }
+         stage('Compile') {
+            steps {
+                sh 'mvn clean compile'
+            }
+        }
+         stage('sonarqube analysis') {
+            steps {
+                sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.url=http://20.169.134.64:9000/ -Dsonar.login=squ_f764862b745fbfd55bf0c4bbd1dc1183e7089085 -Dsonar.projectName=shopping-cart \
+                -Dsonar.java.binaries= . \
+                -Dsonar.projectKey=shopping-cart '''
+            }
+         }
+        
+          
+          stage('Build Application') {
+            steps {
+                sh "mvn clean install"
+            }
+        }
+         stage('Build and Push Docker image') {
+            steps {
+                script{
+                  withDockerRegistry(credentialsId: '4b7891d3-d9a2-4296-94ee-7549b307621b', url: 'https://hub.docker.com/') {
+    sh "docker build -t shopping:latest -f docker/Dockerfile ."
+    sh "docker tag shopping:latest vaibhavkarade/shoppingcart"
+    sh "docker push vaibhavkarade/shoppingcart"
+} 
+                }
+            }  
+            }
+        stage('Trigger CD pipeline') {
+            steps {
+                build job: "CD pipeline"
+            }
+        } 
+        }
+    }
+
+

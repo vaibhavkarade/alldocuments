@@ -1,0 +1,43 @@
+# azure-pipelines-release.yml
+trigger:
+- none
+
+resources:
+  pipelines:
+    - pipeline: buildPipeline
+      source: my-ml-project  # Name of your build pipeline
+      trigger: 
+        branches:
+          include:
+            - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  azureSubscription: '<Your Azure Subscription Name>'
+  resourceGroup: '<Your Resource Group>'
+  workspaceName: '<Your Workspace Name>'
+  modelName: 'my_ml_model'
+  aksClusterName: '<Your AKS Cluster Name>'
+  region: '<Your Region>'
+
+stages:
+- stage: Deploy
+  jobs:
+  - job: DeployModel
+    steps:
+    - download: buildPipeline
+      artifact: model
+      displayName: 'Download Build Artifacts'
+
+    - task: AzureCLI@2
+      inputs:
+        azureSubscription: $(azureSubscription)
+        scriptType: bash
+        scriptLocation: inlineScript
+        inlineScript: |
+          az ml model register --model-name $(modelName) --model-path $(Pipeline.Workspace)/model/outputs/model.pkl --resource-group $(resourceGroup) --workspace-name $(workspaceName)
+          az ml service create aks --name $(modelName)-aks --model $(modelName):1 --resource-group $(resourceGroup) --workspace-name $(workspaceName) --inference-config inference/environment.yml --aks-cluster-name $(aksClusterName)
+          az monitor app-insights component create --app $(modelName)-ai --location $(region) --resource-group $(resourceGroup)
+          az monitor app-insights component update --app $(modelName)-ai --application-type web

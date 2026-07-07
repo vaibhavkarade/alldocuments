@@ -1,0 +1,73 @@
+variables:
+- name: BuildParameters.solution
+  value: '**\*.sln'
+- name: BuildParameters.connectedServiceName
+  value: 5f7e2130-e314-4e6c-a2a9-d75d6492123f
+- name: BuildParameters.WebAppName
+  value: webapp-ci-cd
+trigger:
+  branches:
+    include:
+    - refs/heads/main
+name: $(date:yyyyMMdd)$(rev:.r)
+jobs:
+- job: Job_1
+  displayName: Agent job 1
+  pool:
+    vmImage: windows-2019
+  steps:
+  - checkout: self
+    fetchDepth: 1
+  - task: NuGetToolInstaller@0
+    displayName: Use NuGet 4.4.1
+    inputs:
+      versionSpec: 4.4.1
+  - task: NuGetCommand@2
+    displayName: NuGet restore
+    inputs:
+      solution: $(BuildParameters.solution)
+  - task: VSBuild@1
+    displayName: Build solution **\*.sln
+    inputs:
+      solution: $(BuildParameters.solution)
+      msbuildArgs: /p:DeployOnBuild=true /p:DeployDefaultTarget=WebPublish /p:WebPublishMethod=FileSystem /p:publishUrl="$(Agent.TempDirectory)\WebAppContent\\"
+      platform: $(BuildPlatform)
+      configuration: $(BuildConfiguration)
+  - task: ArchiveFiles@2
+    displayName: Archive Files
+    inputs:
+      rootFolderOrFile: $(Agent.TempDirectory)\WebAppContent
+      includeRootFolder: false
+  - task: VSTest@2
+    displayName: VsTest - testAssemblies
+    inputs:
+      testAssemblyVer2: >-
+        **\$(BuildConfiguration)\*test*.dll
+
+        !**\obj\**
+      platform: $(BuildPlatform)
+      configuration: $(BuildConfiguration)
+  - task: AzureWebApp@1
+    displayName: 'Azure Web App Deploy: webapp-ci-cd'
+    inputs:
+      azureSubscription: $(BuildParameters.connectedServiceName)
+      appType: webAppLinux
+      appName: $(BuildParameters.WebAppName)
+      deployToSlotOrASE: true
+      resourceGroupName: appservice
+      slotName: stage
+      package: $(build.artifactstagingdirectory)/**/*.zip
+  - task: PublishSymbols@2
+    displayName: Publish symbols path
+    continueOnError: True
+    inputs:
+      SearchPattern: '**\bin\**\*.pdb'
+      PublishSymbols: false
+      SymbolServerType: TeamServices
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish Artifact: drop'
+    condition: succeededOrFailed()
+    inputs:
+      PathtoPublish: $(build.artifactstagingdirectory)
+      TargetPath: '\\my\share\$(Build.DefinitionName)\$(Build.BuildNumber)'
+...
