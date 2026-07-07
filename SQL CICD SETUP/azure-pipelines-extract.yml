@@ -1,0 +1,720 @@
+# ════════════════════════════════════════════════════════════════════
+# DACPAC EXTRACTION PIPELINE
+# Purpose: Extract DACPAC from SQL Database and commit to develop branch
+# Trigger: Manual only
+# Version: 1.0
+# ════════════════════════════════════════════════════════════════════
+
+name: Extract-DACPAC-$(Date:yyyyMMdd)$(Rev:.r)
+
+trigger: none
+pr: none
+
+parameters:
+- name: DatabaseName
+  displayName: 'Database Name'
+  type: string
+  default: 'devsqlcicddatabase'
+
+- name: TargetBranch
+  displayName: 'Target Branch to Commit'
+  type: string
+  default: 'develop'
+
+variables:
+  ServerName: 'devsqlcicdtest.database.windows.net'
+  ResourceGroup: 'sqlcicd'
+  OutputFolder: 'DACPACs/DEV'
+  KeepLatestFile: true
+  MaxHistoryFiles: 10
+  AzureServiceConnection: 'test-connection'
+
+pool:
+  vmImage: 'windows-latest'
+
+jobs:
+- job: ExtractDACPAC
+  displayName: 'Extract DACPAC and Commit'
+  timeoutInMinutes: 30
+  
+  steps:
+  #═══════════════════════════════════════════════════════════════
+  # STEP 1: CONFIGURATION BANNER
+  #═══════════════════════════════════════════════════════════════
+  - powershell: |
+      Write-Host ""
+      Write-Host "╔════════════════════════════════════════════════════════╗" -ForegroundColor Cyan
+      Write-Host "║   DACPAC EXTRACTION PIPELINE                           ║" -ForegroundColor Cyan
+      Write-Host "╚════════════════════════════════════════════════════════╝" -ForegroundColor Cyan
+      Write-Host ""
+      Write-Host "📋 Configuration:" -ForegroundColor Yellow
+      Write-Host "   Database: ${{ parameters.DatabaseName }}" -ForegroundColor White
+      Write-Host "   Server: $(ServerName)" -ForegroundColor White
+      Write-Host "   Branch: ${{ parameters.TargetBranch }}" -ForegroundColor White
+      Write-Host "   Output: $(OutputFolder)" -ForegroundColor White
+      Write-Host "   Keep Latest: $(KeepLatestFile)" -ForegroundColor White
+      Write-Host "   Max History: $(MaxHistoryFiles) files" -ForegroundColor White
+      Write-Host ""
+      Write-Host "🔧 Build Info:" -ForegroundColor Yellow
+      Write-Host "   Build Number: $(Build.BuildNumber)" -ForegroundColor White
+      Write-Host "   Build ID: $(Build.BuildId)" -ForegroundColor White
+      Write-Host "   Requested By: $(Build.RequestedFor)" -ForegroundColor White
+      Write-Host "   Agent: $(Agent.Name)" -ForegroundColor White
+      Write-Host ""
+    displayName: '📋 Configuration'
+  
+  #═══════════════════════════════════════════════════════════════
+  # STEP 2: INSTALL SQLPACKAGE
+  #═══════════════════════════════════════════════════════════════
+  - task: PowerShell@2
+    displayName: '🔧 Install SqlPackage'
+    inputs:
+      targetType: 'inline'
+      script: |
+        Write-Host "Installing SqlPackage..." -ForegroundColor Yellow
+        Write-Host ""
+        
+        # Check if already installed
+        $sqlPackageExists = Get-Command sqlpackage -ErrorAction SilentlyContinue
+        
+        if ($sqlPackageExists) {
+          Write-Host "✅ SqlPackage already installed" -ForegroundColor Green
+          Write-Host "   Location: $($sqlPackageExists.Source)" -ForegroundColor Gray
+        } else {
+          Write-Host "📦 Installing SqlPackage as .NET global tool..." -ForegroundColor Gray
+          Write-Host ""
+          
+          # Install with specific stable version
+          $installOutput = dotnet tool install -g microsoft.sqlpackage --version 162.2.111 2>&1
+          
+          $installOutput | ForEach-Object {
+            $line = $_.ToString()
+            if ($line -like "*already installed*") {
+              Write-Host "   ℹ️  Already installed" -ForegroundColor Yellow
+            } elseif ($line -like "*successfully installed*") {
+              Write-Host "   ✅ $_" -ForegroundColor Green
+            } elseif ($line -like "*error*") {
+              Write-Host "   ❌ $_" -ForegroundColor Red
+            } elseif ($line.Trim()) {
+              Write-Host "   $_" -ForegroundColor Gray
+            }
+          }
+          
+          # Add to PATH for current session
+          $dotnetToolsPath = "$env:USERPROFILE\.dotnet\tools"
+          if (Test-Path $dotnetToolsPath) {
+            $env:PATH = "$dotnetToolsPath;$env:PATH"
+            Write-Host ""
+            Write-Host "✅ Added to PATH: $dotnetToolsPath" -ForegroundColor Green
+          }
+        }
+        
+        Write-Host ""
+        Write-Host "✅ SqlPackage ready for use" -ForegroundColor Green
+        Write-Host ""
+      errorActionPreference: 'Continue'
+      failOnStderr: false
+      pwsh: false
+  
+  #═══════════════════════════════════════════════════════════════
+  # STEP 3: CHECKOUT REPOSITORY
+  #═══════════════════════════════════════════════════════════════
+  - checkout: self
+    displayName: '📥 Checkout Repository'
+    persistCredentials: true
+    clean: true
+    fetchDepth: 0
+  
+  #═══════════════════════════════════════════════════════════════
+  # STEP 4: CONFIGURE GIT & BRANCH
+  #═══════════════════════════════════════════════════════════════
+  - powershell: |
+      Write-Host "Setting up Git..." -ForegroundColor Yellow
+      Write-Host ""
+      
+      # Configure Git user
+      git config user.email "azurepipeline@devops.com"
+      git config user.name "Azure Pipeline Bot"
+      Write-Host "✅ Git user configured" -ForegroundColor Green
+      
+      # Fetch all branches
+      Write-Host "📡 Fetching remote branches..." -ForegroundColor Gray
+      git fetch origin
+      
+      # Check if target branch exists
+      $branchExists = git ls-remote --heads origin ${{ parameters.TargetBranch }}
+      
+      if ($branchExists) {
+        Write-Host "🔀 Checking out existing branch: ${{ parameters.TargetBranch }}" -ForegroundColor Gray
+        git checkout ${{ parameters.TargetBranch }}
+        git pull origin ${{ parameters.TargetBranch }}
+      } else {
+        Write-Host "🆕 Creating new branch: ${{ parameters.TargetBranch }}" -ForegroundColor Yellow
+        git checkout -b ${{ parameters.TargetBranch }}
+      }
+      
+      # Initialize Git LFS
+      Write-Host "📦 Initializing Git LFS..." -ForegroundColor Gray
+      git lfs install
+      
+      Write-Host ""
+      Write-Host "✅ Git configured successfully" -ForegroundColor Green
+      Write-Host "   Current Branch: $(git branch --show-current)" -ForegroundColor Cyan
+      Write-Host "   Last Commit: $(git log -1 --oneline)" -ForegroundColor Gray
+      Write-Host ""
+    displayName: '🔀 Configure Git & Branch'
+  
+  #═══════════════════════════════════════════════════════════════
+  # STEP 5: CHECK & CLEANUP EXISTING FILES
+  #═══════════════════════════════════════════════════════════════
+  - powershell: |
+      Write-Host "Checking existing DACPAC files..." -ForegroundColor Yellow
+      Write-Host ""
+      
+      $outputPath = "$(Build.SourcesDirectory)\$(OutputFolder)"
+      
+      # Ensure output folder exists
+      if (-not (Test-Path $outputPath)) {
+        Write-Host "📁 Creating output folder: $(OutputFolder)" -ForegroundColor Gray
+        New-Item -Path $outputPath -ItemType Directory -Force | Out-Null
+      }
+      
+      # Find existing timestamped DACPAC files
+      $existingFiles = Get-ChildItem $outputPath -Filter "${{ parameters.DatabaseName }}_*.dacpac" -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -notlike "*_Latest.dacpac" -and $_.Name -match '\d{8}_\d{6}' } |
+        Sort-Object LastWriteTime -Descending
+      
+      if ($existingFiles) {
+        $totalSize = ($existingFiles | Measure-Object -Property Length -Sum).Sum
+        $totalSizeMB = [math]::Round($totalSize / 1MB, 2)
+        
+        Write-Host "📚 Found $($existingFiles.Count) existing file(s) (Total: $totalSizeMB MB):" -ForegroundColor Cyan
+        
+        $existingFiles | Select-Object -First 5 | ForEach-Object {
+          $sizeMB = [math]::Round($_.Length / 1MB, 2)
+          $age = (Get-Date) - $_.LastWriteTime
+          Write-Host "   📄 $($_.Name)" -ForegroundColor Gray
+          Write-Host "      Size: $sizeMB MB | Age: $($age.Days)d $($age.Hours)h" -ForegroundColor DarkGray
+        }
+        
+        if ($existingFiles.Count -gt 5) {
+          Write-Host "   ... and $($existingFiles.Count - 5) more" -ForegroundColor DarkGray
+        }
+        
+        # Cleanup old files if needed
+        $maxHistory = [int]$(MaxHistoryFiles)
+        if ($maxHistory -gt 0 -and $existingFiles.Count -ge $maxHistory) {
+          Write-Host ""
+          Write-Host "🧹 Removing old files (keeping last $maxHistory)..." -ForegroundColor Yellow
+          
+          $filesToDelete = $existingFiles | Select-Object -Skip ($maxHistory - 1)
+          $deletedSize = ($filesToDelete | Measure-Object -Property Length -Sum).Sum
+          $deletedSizeMB = [math]::Round($deletedSize / 1MB, 2)
+          
+          $filesToDelete | ForEach-Object {
+            Write-Host "   🗑️  Removing: $($_.Name)" -ForegroundColor Gray
+            Remove-Item $_.FullName -Force
+          }
+          
+          Write-Host "   ✅ Removed $($filesToDelete.Count) file(s), freed $deletedSizeMB MB" -ForegroundColor Green
+        }
+      } else {
+        Write-Host "ℹ️  No existing timestamped DACPAC files found" -ForegroundColor Gray
+        Write-Host "   This will be the first extraction" -ForegroundColor Gray
+      }
+      
+      # Check for Latest file
+      $latestFile = Join-Path $outputPath "${{ parameters.DatabaseName }}_Latest.dacpac"
+      if (Test-Path $latestFile) {
+        $latestInfo = Get-Item $latestFile
+        $latestSizeMB = [math]::Round($latestInfo.Length / 1MB, 2)
+        $latestAge = (Get-Date) - $latestInfo.LastWriteTime
+        Write-Host ""
+        Write-Host "📌 Latest file exists:" -ForegroundColor Cyan
+        Write-Host "   Size: $latestSizeMB MB | Last Updated: $($latestAge.Days)d $($latestAge.Hours)h ago" -ForegroundColor Gray
+      }
+      
+      Write-Host ""
+    displayName: '📚 Check & Cleanup Files'
+  
+  #═══════════════════════════════════════════════════════════════
+  # STEP 6: EXTRACT DACPAC FROM DATABASE
+  #═══════════════════════════════════════════════════════════════
+  - task: AzureCLI@2
+    displayName: '⚡ Extract DACPAC'
+    name: Extract
+    inputs:
+      azureSubscription: $(AzureServiceConnection)
+      scriptType: 'pscore'
+      scriptLocation: 'inlineScript'
+      inlineScript: |
+        Write-Host ""
+        Write-Host "╔════════════════════════════════════════════════════════╗" -ForegroundColor Green
+        Write-Host "║              EXTRACTING DACPAC                         ║" -ForegroundColor Green
+        Write-Host "╚════════════════════════════════════════════════════════╝" -ForegroundColor Green
+        Write-Host ""
+        
+        # Generate filenames
+        $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+        $dacpacFileName = "${{ parameters.DatabaseName }}_$timestamp.dacpac"
+        $dacpacLatestName = "${{ parameters.DatabaseName }}_Latest.dacpac"
+        
+        $outputPath = "$(Build.SourcesDirectory)\$(OutputFolder)"
+        $dacpacPath = Join-Path $outputPath $dacpacFileName
+        $dacpacLatestPath = Join-Path $outputPath $dacpacLatestName
+        
+        Write-Host "📄 Target Files:" -ForegroundColor Yellow
+        Write-Host "   Timestamped: $dacpacFileName" -ForegroundColor Cyan
+        Write-Host "   Latest: $dacpacLatestName" -ForegroundColor Cyan
+        Write-Host "   Location: $(OutputFolder)" -ForegroundColor Gray
+        Write-Host ""
+        
+        # Ensure SqlPackage is in PATH
+        $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
+        
+        # Verify SqlPackage
+        Write-Host "🔍 Verifying SqlPackage..." -ForegroundColor Yellow
+        $sqlPackageCmd = Get-Command sqlpackage -ErrorAction SilentlyContinue
+        
+        if (-not $sqlPackageCmd) {
+          Write-Host "❌ SqlPackage not found in PATH!" -ForegroundColor Red
+          Write-Host "   PATH: $env:PATH" -ForegroundColor Gray
+          exit 1
+        }
+        
+        Write-Host "✅ SqlPackage found" -ForegroundColor Green
+        Write-Host "   Location: $($sqlPackageCmd.Source)" -ForegroundColor Gray
+        Write-Host ""
+        
+        # Get SQL access token
+        Write-Host "🔐 Authenticating to Azure SQL..." -ForegroundColor Yellow
+        $accessToken = az account get-access-token --resource https://database.windows.net --query accessToken -o tsv
+        
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrEmpty($accessToken)) {
+          Write-Host "❌ Failed to obtain SQL access token!" -ForegroundColor Red
+          Write-Host "   Check service principal permissions" -ForegroundColor Gray
+          exit 1
+        }
+        
+        $tokenLength = $accessToken.Length
+        Write-Host "✅ Access token obtained (length: $tokenLength)" -ForegroundColor Green
+        Write-Host ""
+        
+        # Extract DACPAC
+        Write-Host "⏳ Starting DACPAC extraction..." -ForegroundColor Yellow
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Gray
+        Write-Host "   Source Database: ${{ parameters.DatabaseName }}" -ForegroundColor Cyan
+        Write-Host "   Source Server: $(ServerName)" -ForegroundColor Cyan
+        Write-Host "   Target File: $dacpacFileName" -ForegroundColor Cyan
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "⚙️  Extraction in progress (this may take a few minutes)..." -ForegroundColor Gray
+        Write-Host ""
+        
+        $extractStart = Get-Date
+        
+        $connectionString = "Server=$(ServerName);Database=${{ parameters.DatabaseName }};Encrypt=True;"
+        
+        # Execute SqlPackage extraction
+        & sqlpackage `
+          /Action:Extract `
+          /TargetFile:"$dacpacPath" `
+          /SourceConnectionString:"$connectionString" `
+          /AccessToken:"$accessToken" `
+          /p:ExtractAllTableData=False `
+          /p:VerifyExtraction=True `
+          /p:CommandTimeout=300 `
+          /p:LongRunningCommandTimeout=0
+        
+        $extractExitCode = $LASTEXITCODE
+        $extractEnd = Get-Date
+        $duration = ($extractEnd - $extractStart).TotalSeconds
+        
+        Write-Host ""
+        Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Gray
+        
+        # Check extraction result
+        if ($extractExitCode -ne 0) {
+          Write-Host ""
+          Write-Host "❌ EXTRACTION FAILED!" -ForegroundColor Red
+          Write-Host "   Exit Code: $extractExitCode" -ForegroundColor Red
+          Write-Host "   Duration: $([math]::Round($duration, 2))s" -ForegroundColor Gray
+          Write-Host ""
+          Write-Host "💡 Troubleshooting:" -ForegroundColor Yellow
+          Write-Host "   • Check service principal has db_datareader + VIEW DEFINITION permissions" -ForegroundColor White
+          Write-Host "   • Verify firewall allows Azure services" -ForegroundColor White
+          Write-Host "   • Check database exists and is online" -ForegroundColor White
+          Write-Host ""
+          exit 1
+        }
+        
+        # Verify file was created
+        if (-not (Test-Path $dacpacPath)) {
+          Write-Host ""
+          Write-Host "❌ DACPAC file was not created!" -ForegroundColor Red
+          Write-Host "   Expected: $dacpacPath" -ForegroundColor Gray
+          exit 1
+        }
+        
+        # Get file info
+        $fileInfo = Get-Item $dacpacPath
+        $fileSizeBytes = $fileInfo.Length
+        $fileSizeKB = [math]::Round($fileSizeBytes / 1KB, 2)
+        $fileSizeMB = [math]::Round($fileSizeBytes / 1MB, 2)
+        
+        # Display success
+        Write-Host ""
+        Write-Host "✅ EXTRACTION COMPLETED SUCCESSFULLY!" -ForegroundColor Green
+        Write-Host "╔════════════════════════════════════════════════════════╗" -ForegroundColor Green
+        Write-Host "║                 EXTRACTION RESULTS                     ║" -ForegroundColor Green
+        Write-Host "╚════════════════════════════════════════════════════════╝" -ForegroundColor Green
+        Write-Host ""
+        Write-Host "📄 File Information:" -ForegroundColor Yellow
+        Write-Host "   Name: $dacpacFileName" -ForegroundColor Cyan
+        Write-Host "   Size: $fileSizeMB MB ($fileSizeKB KB)" -ForegroundColor Cyan
+        Write-Host "   Path: $(OutputFolder)/$dacpacFileName" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "⏱️  Performance:" -ForegroundColor Yellow
+        Write-Host "   Duration: $([math]::Round($duration, 2)) seconds" -ForegroundColor Cyan
+        Write-Host "   Speed: $([math]::Round($fileSizeMB / $duration, 2)) MB/s" -ForegroundColor Cyan
+        Write-Host ""
+        Write-Host "📊 Database:" -ForegroundColor Yellow
+        Write-Host "   Name: ${{ parameters.DatabaseName }}" -ForegroundColor Cyan
+        Write-Host "   Server: $(ServerName)" -ForegroundColor Cyan
+        Write-Host "   Extracted: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor Cyan
+        Write-Host ""
+        
+        # Update Latest file
+        if ($(KeepLatestFile) -eq 'true') {
+          Write-Host "💾 Updating Latest file..." -ForegroundColor Yellow
+          Copy-Item -Path $dacpacPath -Destination $dacpacLatestPath -Force
+          Write-Host "✅ Latest updated: $dacpacLatestName" -ForegroundColor Green
+          Write-Host ""
+        }
+        
+        # Create metadata JSON
+        Write-Host "📝 Creating metadata file..." -ForegroundColor Yellow
+        
+        $metadata = @{
+          Extraction = @{
+            Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+            TimestampUTC = (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd HH:mm:ss")
+            DurationSeconds = [math]::Round($duration, 2)
+            ExtractedBy = "$(Build.RequestedFor)"
+            BuildNumber = "$(Build.BuildNumber)"
+            BuildId = "$(Build.BuildId)"
+            PipelineName = "$(Build.DefinitionName)"
+          }
+          Database = @{
+            Name = "${{ parameters.DatabaseName }}"
+            Server = "$(ServerName)"
+            ResourceGroup = "$(ResourceGroup)"
+          }
+          Files = @{
+            DacpacFile = $dacpacFileName
+            LatestFile = $dacpacLatestName
+            SizeMB = $fileSizeMB
+            SizeKB = $fileSizeKB
+            SizeBytes = $fileSizeBytes
+          }
+          Repository = @{
+            Branch = "${{ parameters.TargetBranch }}"
+            Folder = "$(OutputFolder)"
+            CommitPending = $true
+          }
+          GitLFS = @{
+            Enabled = $true
+            Tracked = "*.dacpac"
+          }
+        } | ConvertTo-Json -Depth 10
+        
+        $metadataFile = Join-Path $outputPath "${{ parameters.DatabaseName }}_metadata.json"
+        $metadata | Out-File -FilePath $metadataFile -Encoding UTF8 -Force
+        
+        Write-Host "✅ Metadata saved: ${{ parameters.DatabaseName }}_metadata.json" -ForegroundColor Green
+        Write-Host ""
+        
+        # Set output variables for next steps
+        Write-Host "📤 Setting pipeline variables..." -ForegroundColor Gray
+        Write-Host "##vso[task.setvariable variable=DacpacFileName;isOutput=true]$dacpacFileName"
+        Write-Host "##vso[task.setvariable variable=DacpacSizeMB;isOutput=true]$fileSizeMB"
+        Write-Host "##vso[task.setvariable variable=ExtractionDuration;isOutput=true]$([math]::Round($duration, 2))"
+        Write-Host ""
+  
+  #═══════════════════════════════════════════════════════════════
+  # STEP 7: COMMIT & PUSH TO AZURE REPOS
+  #═══════════════════════════════════════════════════════════════
+  - task: PowerShell@2
+    displayName: '📤 Commit & Push'
+    inputs:
+      targetType: 'inline'
+      errorActionPreference: 'Continue'
+      failOnStderr: false
+      script: |
+        Write-Host ""
+        Write-Host "╔════════════════════════════════════════════════════════╗" -ForegroundColor Magenta
+        Write-Host "║              COMMITTING TO AZURE REPOS                 ║" -ForegroundColor Magenta
+        Write-Host "╚════════════════════════════════════════════════════════╝" -ForegroundColor Magenta
+        Write-Host ""
+        
+        # Stage files
+        Write-Host "📝 Staging files..." -ForegroundColor Yellow
+        git add "$(OutputFolder)/*"
+        
+        # Check if there are changes to commit
+        git diff --cached --quiet
+        $hasChanges = $LASTEXITCODE -ne 0
+        
+        if ($hasChanges) {
+          # Get list of staged files
+          $stagedFiles = git diff --cached --name-only
+          $fileCount = ($stagedFiles | Measure-Object).Count
+          
+          Write-Host "✅ Staged $fileCount file(s):" -ForegroundColor Green
+          $stagedFiles | ForEach-Object { Write-Host "   📄 $_" -ForegroundColor Cyan }
+          Write-Host ""
+          
+          # Get file sizes
+          $totalSize = 0
+          $stagedFiles | ForEach-Object {
+            $filePath = Join-Path "$(Build.SourcesDirectory)" $_
+            if (Test-Path $filePath) {
+              $totalSize += (Get-Item $filePath).Length
+            }
+          }
+          $totalSizeMB = [math]::Round($totalSize / 1MB, 2)
+          Write-Host "   Total Size: $totalSizeMB MB" -ForegroundColor Gray
+          Write-Host ""
+          
+          # Create detailed commit message
+          $commitMsg = "Auto-update DACPAC - ${{ parameters.DatabaseName }}"
+          $commitMsg += "`n`n📊 Extraction Details:"
+          $commitMsg += "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          $commitMsg += "`nDatabase: ${{ parameters.DatabaseName }}"
+          $commitMsg += "`nServer: $(ServerName)"
+          $commitMsg += "`nFile: $(Extract.DacpacFileName)"
+          $commitMsg += "`nSize: $(Extract.DacpacSizeMB) MB"
+          $commitMsg += "`nDuration: $(Extract.ExtractionDuration)s"
+          $commitMsg += "`nExtracted: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+          $commitMsg += "`n"
+          $commitMsg += "`n🔧 Build Information:"
+          $commitMsg += "`n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          $commitMsg += "`nBuild: $(Build.BuildNumber)"
+          $commitMsg += "`nBuild ID: $(Build.BuildId)"
+          $commitMsg += "`nRequested By: $(Build.RequestedFor)"
+          $commitMsg += "`nPipeline: $(Build.DefinitionName)"
+          $commitMsg += "`n"
+          $commitMsg += "`n[skip ci]"
+          
+          # Commit changes
+          Write-Host "💾 Creating commit..." -ForegroundColor Yellow
+          git commit -m $commitMsg
+          
+          if ($LASTEXITCODE -eq 0) {
+            $commitHash = git rev-parse --short HEAD
+            $commitHashFull = git rev-parse HEAD
+            
+            Write-Host "✅ Commit created successfully!" -ForegroundColor Green
+            Write-Host "   Short Hash: $commitHash" -ForegroundColor Cyan
+            Write-Host "   Full Hash: $commitHashFull" -ForegroundColor Gray
+            Write-Host ""
+            
+            # Verify Git LFS tracking
+            Write-Host "🔍 Verifying Git LFS tracking..." -ForegroundColor Yellow
+            $lfsCheck = git lfs ls-files 2>&1 | Out-String
+            
+            if ($lfsCheck -like "*dacpac*") {
+              Write-Host "✅ DACPAC files are tracked in Git LFS" -ForegroundColor Green
+              
+              # Show LFS tracked files
+              $lfsFiles = git lfs ls-files | Select-Object -First 3
+              $lfsFiles | ForEach-Object {
+                if ($_.Trim()) {
+                  Write-Host "   📦 $_" -ForegroundColor Cyan
+                }
+              }
+            } else {
+              Write-Host "⚠️  Warning: DACPAC files may not be tracked in LFS" -ForegroundColor Yellow
+              Write-Host "   Ensure .gitattributes contains: *.dacpac filter=lfs" -ForegroundColor Gray
+            }
+            Write-Host ""
+            
+            # Push to Azure Repos (includes LFS automatically)
+            Write-Host "⬆️  Pushing to Azure Repos..." -ForegroundColor Yellow
+            Write-Host "   Target Branch: ${{ parameters.TargetBranch }}" -ForegroundColor Cyan
+            Write-Host "   Repository: sql-cicd-setup" -ForegroundColor Gray
+            Write-Host "   (Git LFS objects will be pushed automatically)" -ForegroundColor Gray
+            Write-Host ""
+            
+            # Capture push output
+            Write-Host "📡 Pushing..." -ForegroundColor Gray
+            
+            $pushOutput = git push origin ${{ parameters.TargetBranch }} 2>&1
+            $pushExitCode = $LASTEXITCODE
+            
+            # Display filtered output
+            if ($pushOutput) {
+              $pushOutput | ForEach-Object {
+                $line = $_.ToString()
+                # Filter out locking warnings
+                if ($line -notlike "*Locking support detected*" -and $line -notlike "*git config lfs*") {
+                  if ($line -like "*error*" -or $line -like "*fatal*") {
+                    Write-Host "   ❌ $line" -ForegroundColor Red
+                  } elseif ($line -like "*->*") {
+                    Write-Host "   ✅ $line" -ForegroundColor Green
+                  } elseif ($line -like "*Uploading LFS*") {
+                    Write-Host "   📦 $line" -ForegroundColor Cyan
+                  } elseif ($line.Trim()) {
+                    Write-Host "   $line" -ForegroundColor Gray
+                  }
+                }
+              }
+            }
+            
+            Write-Host ""
+            
+            if ($pushExitCode -eq 0) {
+              Write-Host "╔════════════════════════════════════════════════════════╗" -ForegroundColor Green
+              Write-Host "║          ✅ PUSHED SUCCESSFULLY!                      ║" -ForegroundColor Green
+              Write-Host "╚════════════════════════════════════════════════════════╝" -ForegroundColor Green
+              Write-Host ""
+              Write-Host "✅ All changes committed and pushed to branch: ${{ parameters.TargetBranch }}" -ForegroundColor Green
+              Write-Host "✅ Git LFS objects uploaded successfully" -ForegroundColor Green
+              Write-Host ""
+              Write-Host "🔗 View commit: https://dev.azure.com/DevOpsStuffs/cicdtestauto/_git/sql-cicd-setup/commit/$commitHashFull" -ForegroundColor Cyan
+              Write-Host ""
+            } else {
+              Write-Host "❌ Push failed with exit code: $pushExitCode" -ForegroundColor Red
+              Write-Host ""
+              Write-Host "💡 Troubleshooting:" -ForegroundColor Yellow
+              Write-Host "   • Check Build Service has Contribute permission" -ForegroundColor White
+              Write-Host "   • Verify persistCredentials: true in checkout step" -ForegroundColor White
+              Write-Host "   • Check branch policies allow push" -ForegroundColor White
+              Write-Host ""
+              exit 1
+            }
+          } else {
+            Write-Host "❌ Commit failed!" -ForegroundColor Red
+            Write-Host "   Exit Code: $LASTEXITCODE" -ForegroundColor Gray
+            exit 1
+          }
+        } else {
+          Write-Host "ℹ️  No changes to commit" -ForegroundColor Cyan
+          Write-Host "   The database schema has not changed since last extraction" -ForegroundColor Gray
+          Write-Host "   DACPAC file is identical to the previous version" -ForegroundColor Gray
+          Write-Host ""
+          Write-Host "✅ Pipeline completed (no updates needed)" -ForegroundColor Green
+          Write-Host ""
+        }
+  
+  #═══════════════════════════════════════════════════════════════
+  # STEP 8: FINAL SUMMARY
+  #═══════════════════════════════════════════════════════════════
+  - powershell: |
+      Write-Host ""
+      Write-Host "╔════════════════════════════════════════════════════════╗" -ForegroundColor Green
+      Write-Host "║          ✅ PIPELINE COMPLETED SUCCESSFULLY ✅        ║" -ForegroundColor Green
+      Write-Host "╚════════════════════════════════════════════════════════╝" -ForegroundColor Green
+      Write-Host ""
+      Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+      Write-Host "                    EXTRACTION SUMMARY                     " -ForegroundColor Yellow
+      Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+      Write-Host ""
+      Write-Host "📊 Database Information:" -ForegroundColor Cyan
+      Write-Host "   Database Name: ${{ parameters.DatabaseName }}" -ForegroundColor White
+      Write-Host "   SQL Server: $(ServerName)" -ForegroundColor White
+      Write-Host "   Resource Group: $(ResourceGroup)" -ForegroundColor White
+      Write-Host ""
+      Write-Host "📄 Generated Files:" -ForegroundColor Cyan
+      Write-Host "   Timestamped: $(Extract.DacpacFileName)" -ForegroundColor White
+      Write-Host "   Latest: ${{ parameters.DatabaseName }}_Latest.dacpac" -ForegroundColor White
+      Write-Host "   Metadata: ${{ parameters.DatabaseName }}_metadata.json" -ForegroundColor White
+      Write-Host "   File Size: $(Extract.DacpacSizeMB) MB" -ForegroundColor White
+      Write-Host ""
+      Write-Host "📁 Repository:" -ForegroundColor Cyan
+      Write-Host "   Branch: ${{ parameters.TargetBranch }}" -ForegroundColor White
+      Write-Host "   Folder: $(OutputFolder)" -ForegroundColor White
+      Write-Host "   Git LFS: Enabled" -ForegroundColor White
+      Write-Host ""
+      Write-Host "⏱️  Performance:" -ForegroundColor Cyan
+      Write-Host "   Extraction Duration: $(Extract.ExtractionDuration)s" -ForegroundColor White
+      Write-Host "   Total Pipeline Duration: $([math]::Round(((Get-Date) - [DateTime]'$(System.PipelineStartTime)').TotalSeconds, 2))s" -ForegroundColor White
+      Write-Host ""
+      Write-Host "🔧 Build Details:" -ForegroundColor Cyan
+      Write-Host "   Build Number: $(Build.BuildNumber)" -ForegroundColor White
+      Write-Host "   Build ID: $(Build.BuildId)" -ForegroundColor White
+      Write-Host "   Requested By: $(Build.RequestedFor)" -ForegroundColor White
+      Write-Host "   Completed: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor White
+      Write-Host ""
+      Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+      Write-Host ""
+      Write-Host "🔗 Quick Links:" -ForegroundColor Cyan
+      Write-Host ""
+      Write-Host "   📂 Repository:" -ForegroundColor Yellow
+      Write-Host "   https://dev.azure.com/DevOpsStuffs/cicdtestauto/_git/sql-cicd-setup" -ForegroundColor White
+      Write-Host ""
+      Write-Host "   🌿 Branch (${{ parameters.TargetBranch }}):" -ForegroundColor Yellow
+      Write-Host "   https://dev.azure.com/DevOpsStuffs/cicdtestauto/_git/sql-cicd-setup?version=GB${{ parameters.TargetBranch }}" -ForegroundColor White
+      Write-Host ""
+      Write-Host "   📁 DACPAC Files:" -ForegroundColor Yellow
+      Write-Host "   https://dev.azure.com/DevOpsStuffs/cicdtestauto/_git/sql-cicd-setup?path=/$(OutputFolder)&version=GB${{ parameters.TargetBranch }}" -ForegroundColor White
+      Write-Host ""
+      Write-Host "   🔄 This Pipeline:" -ForegroundColor Yellow
+      Write-Host "   https://dev.azure.com/DevOpsStuffs/cicdtestauto/_build/results?buildId=$(Build.BuildId)" -ForegroundColor White
+      Write-Host ""
+      Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+      Write-Host ""
+      Write-Host "💡 Next Steps:" -ForegroundColor Cyan
+      Write-Host ""
+      Write-Host "   1️⃣  Review the extracted DACPAC in Azure Repos" -ForegroundColor White
+      Write-Host "   2️⃣  Run your deployment pipeline to deploy this version" -ForegroundColor White
+      Write-Host "   3️⃣  Use '$(Extract.DacpacFileName)' for specific version" -ForegroundColor White
+      Write-Host "   4️⃣  Or use '${{ parameters.DatabaseName }}_Latest.dacpac' for always-current" -ForegroundColor White
+      Write-Host ""
+      Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Yellow
+      Write-Host ""
+      Write-Host "✨ Thank you for using the DACPAC Extraction Pipeline! ✨" -ForegroundColor Green
+      Write-Host ""
+    displayName: '✅ Final Summary'
+    condition: succeeded()
+  
+  #═══════════════════════════════════════════════════════════════
+  # STEP 9: CLEANUP ON FAILURE
+  #═══════════════════════════════════════════════════════════════
+  - powershell: |
+      Write-Host ""
+      Write-Host "╔════════════════════════════════════════════════════════╗" -ForegroundColor Red
+      Write-Host "║          ❌ PIPELINE FAILED                           ║" -ForegroundColor Red
+      Write-Host "╚════════════════════════════════════════════════════════╝" -ForegroundColor Red
+      Write-Host ""
+      Write-Host "⚠️  The DACPAC extraction pipeline encountered an error." -ForegroundColor Yellow
+      Write-Host ""
+      Write-Host "📋 Failure Details:" -ForegroundColor Cyan
+      Write-Host "   Pipeline: $(Build.DefinitionName)" -ForegroundColor White
+      Write-Host "   Build: $(Build.BuildNumber)" -ForegroundColor White
+      Write-Host "   Build ID: $(Build.BuildId)" -ForegroundColor White
+      Write-Host "   Failed At: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ForegroundColor White
+      Write-Host ""
+      Write-Host "💡 Common Issues:" -ForegroundColor Yellow
+      Write-Host ""
+      Write-Host "   🔐 Authentication:" -ForegroundColor Cyan
+      Write-Host "   • Service principal missing SQL permissions" -ForegroundColor White
+      Write-Host "   • Service connection expired or invalid" -ForegroundColor White
+      Write-Host "   • SQL firewall blocking Azure DevOps" -ForegroundColor White
+      Write-Host ""
+      Write-Host "   📦 SqlPackage:" -ForegroundColor Cyan
+      Write-Host "   • Installation failed" -ForegroundColor White
+      Write-Host "   • Version compatibility issue" -ForegroundColor White
+      Write-Host ""
+      Write-Host "   🔀 Git/Repository:" -ForegroundColor Cyan
+      Write-Host "   • Build service lacks Contribute permission" -ForegroundColor White
+      Write-Host "   • Branch policies preventing push" -ForegroundColor White
+      Write-Host "   • Git LFS not configured" -ForegroundColor White
+      Write-Host ""
+      Write-Host "🔍 Review the logs above for specific error messages." -ForegroundColor Yellow
+      Write-Host ""
+      Write-Host "🔗 View Full Logs:" -ForegroundColor Cyan
+      Write-Host "   https://dev.azure.com/DevOpsStuffs/cicdtestauto/_build/results?buildId=$(Build.BuildId)" -ForegroundColor White
+      Write-Host ""
+    displayName: '❌ Failure Summary'
+    condition: failed()

@@ -1,0 +1,62 @@
+-- ════════════════════════════════════════════════════════════════════
+-- REQUIRED: Grant extraction permissions to service principal
+-- Run this on: devsqlcicdtest.database.windows.net/devsqlcicddatabase
+-- ════════════════════════════════════════════════════════════════════
+
+-- Replace with your actual service principal name
+DECLARE @ServicePrincipalName NVARCHAR(128) = 'ansible-policy-sp';
+
+-- Create user from Azure AD service principal
+DECLARE @CreateUserSQL NVARCHAR(MAX) = 
+    N'CREATE USER [' + @ServicePrincipalName + '] FROM EXTERNAL PROVIDER;';
+    
+EXEC sp_executesql @CreateUserSQL;
+GO
+
+-- Option A: Grant minimum required permissions (RECOMMENDED)
+-- These are sufficient for DACPAC extraction
+
+DECLARE @ServicePrincipalName NVARCHAR(128) = 'ansible-policy-sp';
+
+-- Grant read access to all schemas and objects
+ALTER ROLE db_datareader ADD MEMBER [ansible-policy-sp];
+
+-- Grant ability to read schema definitions
+GRANT VIEW DEFINITION TO [ansible-policy-sp];
+GRANT VIEW DATABASE STATE TO [ansible-policy-sp];
+GO
+
+-- Option B: Grant broader permissions (if Option A doesn't work)
+-- ALTER ROLE db_ddladmin ADD MEMBER [your-service-principal-name];
+
+-- Option C: Grant full access (use only if necessary)
+-- ALTER ROLE db_owner ADD MEMBER [your-service-principal-name];
+GO
+
+-- ════════════════════════════════════════════════════════════════════
+-- VERIFY PERMISSIONS
+-- ════════════════════════════════════════════════════════════════════
+
+-- Check if user exists
+SELECT 
+    name as UserName,
+    type_desc as UserType,
+    create_date as Created
+FROM sys.database_principals
+WHERE name = 'ansible-policy-sp';
+
+-- Check role memberships
+SELECT 
+    USER_NAME(rm.member_principal_id) AS UserName,
+    USER_NAME(rm.role_principal_id) AS RoleName
+FROM sys.database_role_members rm
+WHERE USER_NAME(rm.member_principal_id) = 'ansible-policy-sp';
+
+-- Check specific permissions
+SELECT 
+    class_desc,
+    permission_name,
+    state_desc
+FROM sys.database_permissions
+WHERE grantee_principal_id = USER_ID('ansible-policy-sp');
+GO

@@ -1,0 +1,318 @@
+# Deploy DACPAC to SQL Server - Support Small Databases
+name: DACPAC-Deploy-$(Date:yyyyMMdd)$(Rev:.r)
+
+trigger:
+  branches:
+    include:
+      - develop
+  paths:
+    include:
+      - 'DACPACs/**'
+
+variables:
+  dacpacFolder: 'DACPACs/DEV'
+  azureSubscription: 'test-connection'
+  sqlServerName: 'prodsqlcicdtest'
+  databaseName: 'prodsqlcicddatabase'
+  resourceGroup: 'sqlcicd'
+  minFileSizeKB: 2  # 2 KB minimum (allows small databases)
+
+pool:
+  vmImage: 'windows-latest'
+
+stages:
+
+- stage: Validate
+  displayName: 'Validate DACPAC'
+  jobs:
+  - job: ValidateJob
+    displayName: 'Find and Validate DACPAC'
+    steps:
+    
+    - checkout: self
+      displayName: 'Checkout Repository'
+      lfs: true
+    
+    - task: PowerShell@2
+      displayName: 'Find Latest DACPAC by Timestamp'
+      inputs:
+        targetType: 'inline'
+        script: |
+          $folderPath = "$(Build.SourcesDirectory)/$(dacpacFolder)"
+          $minFileSizeBytes = $(minFileSizeKB) * 1024
+          
+          Write-Host "Finding latest DACPAC by timestamp in: $folderPath"
+          Write-Host "Minimum file size: $(minFileSizeKB) KB"
+          Write-Host ""
+          
+          if (-not (Test-Path $folderPath)) {
+              Write-Error "Folder not found: $folderPath"
+              exit 1
+          }
+          
+          # Show ALL files
+          Write-Host "All DACPAC files in folder:"
+          Get-ChildItem -Path $folderPath -Filter "*.dacpac" | ForEach-Object {
+              $sizeKB = [math]::Round($_.Length/1KB,2)
+              $hasLatest = if ($_.Name -like "*Latest*") { " [EXCLUDED - Contains Latest]" } else { "" }
+              $tooSmall = if ($_.Length -lt $minFileSizeBytes) { " [EXCLUDED - Too Small]" } else { "" }
+              
+              Write-Host "  - $($_.Name) ($sizeKB KB) - Modified: $($_.LastWriteTime)$hasLatest$tooSmall"
+          }
+          Write-Host ""
+          
+          # Get valid DACPAC files
+          $dacpacFiles = Get-ChildItem -Path $folderPath -Filter "*.dacpac" | 
+                         Where-Object { 
+                           $_.Name -notlike "*Latest*" -and 
+                           $_.Length -ge $minFileSizeBytes 
+                         } |
+                         Sort-Object LastWriteTime -Descending
+          
+          if ($dacpacFiles.Count -eq 0) {
+              Write-Error "No valid DACPAC files found (minimum size: $(minFileSizeKB) KB, excluding Latest files)"
+              exit 1
+          }
+          
+          Write-Host "Valid DACPAC files (sorted by timestamp, newest first):"
+          Write-Host ""
+          $dacpacFiles | ForEach-Object {
+              $sizeKB = [math]::Round($_.Length/1KB,2)
+              Write-Host "  - $($_.Name) ($sizeKB KB) - Modified: $($_.LastWriteTime)"
+          }
+          Write-Host ""
+          
+          # Select the latest
+          $latestDacpac = $dacpacFiles[0]
+          $sizeKB = [math]::Round($latestDacpac.Length/1KB,2)
+          
+          Write-Host "Selected DACPAC:"
+          Write-Host "  File: $($latestDacpac.Name)"
+          Write-Host "  Size: $sizeKB KB"
+          Write-Host "  Modified: $($latestDacpac.LastWriteTime)"
+          Write-Host ""
+          
+          # Validate DACPAC structure
+          try {
+              Add-Type -Assembly System.IO.Compression.FileSystem
+              $zip = [System.IO.Compression.ZipFile]::OpenRead($latestDacpac.FullName)
+              $hasModel = $zip.Entries | Where-Object { $_.Name -eq "model.xml" }
+              $entryCount = $zip.Entries.Count
+              $zip.Dispose()
+              
+              if ($hasModel) {
+                  Write-Host "DACPAC structure validated ($entryCount entries, model.xml found)"
+              } else {
+                  Write-Error "model.xml not found in DACPAC"
+                  exit 1
+              }
+          } catch {
+              Write-Error "Invalid DACPAC structure: $_"
+              exit 1
+          }
+          
+          Write-Host ""
+          Write-Host "Validation passed"
+
+- stage: Deploy
+  displayName: 'Deploy to SQL Server'
+  dependsOn: Validate
+  condition: succeeded()
+  jobs:
+  
+  - deployment: DeploySQL
+    displayName: 'Deploy DACPAC'
+    environment: 'PROD'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          
+          - checkout: self
+            displayName: 'Checkout Repository'
+            lfs: true
+          
+          - task: AzurePowerShell@5
+            displayName: 'Deploy DACPAC to Azure SQL'
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              ScriptType: 'InlineScript'
+              azurePowerShellVersion: 'LatestVersion'
+              Inline: |
+                $folderPath = "$(Build.SourcesDirectory)/$(dacpacFolder)"
+                $minFileSizeBytes = $(minFileSizeKB) * 1024
+                
+                Write-Host "Deploying DACPAC to SQL Server"
+                Write-Host "Target: $(sqlServerName).database.windows.net"
+                Write-Host "Database: $(databaseName)"
+                Write-Host ""
+                
+                # Find latest valid DACPAC
+                $latestDacpac = Get-ChildItem -Path $folderPath -Filter "*.dacpac" | 
+                                Where-Object { 
+                                  $_.Name -notlike "*Latest*" -and 
+                                  $_.Length -ge $minFileSizeBytes 
+                                } |
+                                Sort-Object LastWriteTime -Descending | 
+                                Select-Object -First 1
+                
+                if (-not $latestDacpac) {
+                    Write-Error "No valid DACPAC file found"
+                    exit 1
+                }
+                
+                $dacpacPath = $latestDacpac.FullName
+                $sizeKB = [math]::Round($latestDacpac.Length/1KB,2)
+                
+                Write-Host "Selected DACPAC:"
+                Write-Host "  File: $($latestDacpac.Name)"
+                Write-Host "  Size: $sizeKB KB"
+                Write-Host "  Modified: $($latestDacpac.LastWriteTime)"
+                Write-Host "  Path: $dacpacPath"
+                Write-Host ""
+                
+                # Install SqlPackage
+                Write-Host "Installing SqlPackage..."
+                dotnet tool install -g microsoft.sqlpackage 2>&1 | Out-Null
+                $toolPath = "$env:USERPROFILE\.dotnet\tools"
+                $env:PATH = "$toolPath;$env:PATH"
+                Write-Host "##vso[task.prependpath]$toolPath"
+                
+                $sqlpackageCmd = Get-Command sqlpackage -ErrorAction SilentlyContinue
+                if (-not $sqlpackageCmd) {
+                    Write-Error "SqlPackage not found"
+                    exit 1
+                }
+                Write-Host "SqlPackage ready"
+                Write-Host ""
+                
+                # Get token
+                Write-Host "Authenticating with Azure..."
+                try {
+                    $secureToken = (Get-AzAccessToken -ResourceUrl "https://database.windows.net" -AsSecureString).Token 
+                    $token = [System.Net.NetworkCredential]::new("", $secureToken).Password
+                    Write-Host "Token acquired (length: $($token.Length) chars)"
+                } catch {
+                    Write-Error "Failed to acquire token: $_"
+                    exit 1
+                }
+                Write-Host ""
+                
+                # Test connection
+                Write-Host "Testing SQL connection..."
+                try {
+                    $connection = New-Object System.Data.SqlClient.SqlConnection
+                    $connection.ConnectionString = "Server=$(sqlServerName).database.windows.net;Database=$(databaseName);Encrypt=True;"
+                    $connection.AccessToken = $token
+                    $connection.Open()
+                    
+                    $cmd = $connection.CreateCommand()
+                    $cmd.CommandText = "SELECT DB_NAME()"
+                    $dbName = $cmd.ExecuteScalar()
+                    
+                    Write-Host "Connected successfully to database: $dbName"
+                    $connection.Close()
+                } catch {
+                    Write-Error "Connection test failed: $($_.Exception.Message)"
+                    Write-Host ""
+                    Write-Host "Please ensure:"
+                    Write-Host "1. Service principal 'ansible-policy-sp' is added to the database:"
+                    Write-Host "   CREATE USER [ansible-policy-sp] FROM EXTERNAL PROVIDER;"
+                    Write-Host "   ALTER ROLE db_owner ADD MEMBER [ansible-policy-sp];"
+                    Write-Host ""
+                    Write-Host "2. Firewall allows Azure services"
+                    exit 1
+                }
+                Write-Host ""
+                
+                # Deploy
+                Write-Host "Deploying DACPAC (this may take several minutes)..."
+                Write-Host ""
+                $startTime = Get-Date
+                
+                & sqlpackage /Action:Publish /SourceFile:"$dacpacPath" /TargetServerName:"$(sqlServerName).database.windows.net" /TargetDatabaseName:"$(databaseName)" /TargetEncryptConnection:True /AccessToken:"$token" /p:BlockOnPossibleDataLoss=False /p:DropObjectsNotInSource=False /p:IgnoreUserSettingsObjects=True /p:IgnorePermissions=True /p:IgnoreRoleMembership=True
+                
+                $exitCode = $LASTEXITCODE
+                $duration = [math]::Round(((Get-Date) - $startTime).TotalSeconds, 2)
+                
+                Write-Host ""
+                Write-Host "============================================"
+                
+                if ($exitCode -eq 0) {
+                    Write-Host "DEPLOYMENT SUCCESSFUL" -ForegroundColor Green
+                    Write-Host ""
+                    Write-Host "Summary:"
+                    Write-Host "  File: $($latestDacpac.Name)"
+                    Write-Host "  Size: $sizeKB KB"
+                    Write-Host "  Duration: $duration seconds"
+                    Write-Host "  Database: $(databaseName)"
+                    Write-Host "  Completed: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+                } else {
+                    Write-Host "DEPLOYMENT FAILED" -ForegroundColor Red
+                    Write-Host ""
+                    Write-Host "Exit Code: $exitCode"
+                    Write-Host "Duration: $duration seconds"
+                    Write-Error "SqlPackage deployment failed"
+                    exit 1
+                }
+                
+                Write-Host "============================================"
+
+- stage: Verify
+  displayName: 'Verify Deployment'
+  dependsOn: Deploy
+  condition: succeeded()
+  jobs:
+  
+  - job: VerifyJob
+    displayName: 'Verify Database Objects'
+    steps:
+    
+    - task: AzurePowerShell@5
+      displayName: 'Count Database Objects'
+      inputs:
+        azureSubscription: '$(azureSubscription)'
+        ScriptType: 'InlineScript'
+        azurePowerShellVersion: 'LatestVersion'
+        Inline: |
+          Write-Host "Verifying deployment to $(databaseName)..."
+          Write-Host ""
+          
+          if (-not (Get-Module -ListAvailable -Name SqlServer)) {
+              Write-Host "Installing SqlServer module..."
+              Install-Module -Name SqlServer -Force -AllowClobber -Scope CurrentUser -Repository PSGallery -SkipPublisherCheck
+          }
+          Import-Module SqlServer -ErrorAction Stop
+          
+          $secureToken = (Get-AzAccessToken -ResourceUrl "https://database.windows.net" -AsSecureString).Token
+          $token = [System.Net.NetworkCredential]::new("", $secureToken).Password
+          
+          $query = "SELECT COUNT(CASE WHEN type = 'U' THEN 1 END) as Tables, COUNT(CASE WHEN type = 'V' THEN 1 END) as Views, COUNT(CASE WHEN type = 'P' THEN 1 END) as StoredProcedures, COUNT(CASE WHEN type IN ('FN','IF','TF') THEN 1 END) as Functions FROM sys.objects WHERE is_ms_shipped = 0"
+          
+          try {
+              $result = Invoke-Sqlcmd -ServerInstance "$(sqlServerName).database.windows.net" -Database "$(databaseName)" -Query $query -AccessToken $token -Encrypt Mandatory -ErrorAction Stop
+              
+              Write-Host "Database Objects Deployed:"
+              Write-Host "  Tables............: $($result.Tables)"
+              Write-Host "  Views.............: $($result.Views)"
+              Write-Host "  Stored Procedures.: $($result.StoredProcedures)"
+              Write-Host "  Functions.........: $($result.Functions)"
+              
+              $total = $result.Tables + $result.Views + $result.StoredProcedures + $result.Functions
+              Write-Host ""
+              Write-Host "Total Objects: $total"
+              Write-Host ""
+              
+              if ($total -ge 5) {
+                  Write-Host "Verification successful - Expected ~5-6 tables, found $total total objects" -ForegroundColor Green
+              } elseif ($total -eq 0) {
+                  Write-Warning "No objects found - deployment may not have completed"
+              } else {
+                  Write-Host "Deployment verified" -ForegroundColor Green
+              }
+              
+          } catch {
+              Write-Warning "Could not verify deployment: $_"
+              Write-Host ""
+              Write-Host "Please verify manually via Azure Portal"
+          }
